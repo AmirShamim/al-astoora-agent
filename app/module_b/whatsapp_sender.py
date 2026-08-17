@@ -27,6 +27,49 @@ def _get_headers() -> Dict[str, str]:
     }
 
 
+async def mark_message_as_read(message_id: str) -> Dict[str, Any]:
+    """
+    Marks an incoming WhatsApp message as read (triggers blue tick on client's WhatsApp).
+    
+    Args:
+        message_id: The unique WhatsApp message ID (e.g. wamid.HBgL...).
+
+    Returns:
+        Dict with success status and API response or error.
+    """
+    settings = get_settings()
+    if not settings.WHATSAPP_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
+        logger.warning("WhatsApp credentials not configured; skipping mark_message_as_read.")
+        return {"success": False, "error": "Credentials missing", "mock": True}
+
+    if not message_id:
+        return {"success": False, "error": "Missing message_id"}
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                _get_api_url(),
+                headers=_get_headers(),
+                json=payload,
+            )
+            response_json = response.json()
+            if response.status_code in (200, 201):
+                logger.info(f"Successfully marked message {message_id} as read (blue tick).")
+                return {"success": True, "data": response_json}
+            else:
+                logger.warning(f"WhatsApp Read Receipt Error [{response.status_code}]: {response_json}")
+                return {"success": False, "status_code": response.status_code, "error": response_json}
+    except Exception as e:
+        logger.exception(f"Failed to mark message {message_id} as read: {e}")
+        return {"success": False, "error": str(e)}
+
+
 async def send_text_message(
     recipient_phone: str,
     text: str,

@@ -26,7 +26,7 @@ from app.module_b.tools import (
     send_whatsapp_buttons,
     send_whatsapp_list,
 )
-from app.module_b.whatsapp_sender import send_text_message
+from app.module_b.whatsapp_sender import send_text_message, mark_message_as_read
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +106,15 @@ def _build_user_event_prompt(message: ParsedMessage) -> str:
 - Metadata: {metadata_json}
 
 Instruction:
-Follow the consultative workflow for Al Astoora Agency:
-1. If the user shares interest or is greeting, call 'capture_lead' to record them.
-2. If this is a document/image upload (Media ID provided), check which document is pending and call 'validate_document'.
-3. If they inquire about consultations, call 'check_available_slots' or 'book_appointment'.
-4. If they confirm starting a service, call 'get_or_create_client'.
-5. Respond concisely in English without any markdown syntax. If you use a WhatsApp messaging tool (e.g. send_whatsapp_buttons), you do not need to repeat the same text in your final response.
+Follow the consultative workflow for Al Astoora B2B Infrastructure:
+1. Always maintain a warm, human, professional persona.
+2. If the user shares interest or is greeting, call 'capture_lead' behind the scenes to record their intent. Introduce our B2B agency/SaaS infrastructure and ask how we can help.
+3. DO NOT demand documents immediately unless they have confirmed an onboarding track or uploaded a document.
+4. If they ask about services or pricing, share our transparent pricing ranges and offer to book a discovery demo.
+5. If they want to schedule a call, call 'check_available_slots' or 'book_appointment'.
+6. If they confirm starting an onboarding service, call 'get_or_create_client'.
+7. If this is a document/image upload (Media ID provided), check which document is pending and call 'validate_document'.
+8. Respond concisely in English without markdown syntax (no asterisks or hash headers). If you use a WhatsApp messaging tool (e.g. send_whatsapp_buttons or send_whatsapp_list), you do not need to repeat the same text in your final response.
 """
 
 
@@ -301,7 +304,8 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
 async def process_message(message: ParsedMessage) -> None:
     """
     Main asynchronous message processing hook registered with Module A router.
-    Orchestrates the entire agent response lifecycle.
+    Orchestrates the entire agent response lifecycle with blue tick read receipts
+    and human typing pacing.
     """
     sender_phone = message.sender_phone
     profile_name = message.profile_name or "Client"
@@ -312,6 +316,13 @@ async def process_message(message: ParsedMessage) -> None:
         sender_phone,
         message.message_type,
     )
+
+    # 1. Trigger blue tick read receipt immediately on WhatsApp if message ID is present
+    if message.raw_message_id:
+        try:
+            await mark_message_as_read(message.raw_message_id)
+        except Exception as read_err:
+            logger.warning("Could not mark message %s as read: %s", message.raw_message_id, read_err)
 
     try:
         agent = get_agent()
@@ -328,17 +339,26 @@ async def process_message(message: ParsedMessage) -> None:
         # Deliver generated text response if available
         if response_text and isinstance(response_text, str) and response_text.strip():
             clean_text = response_text.strip()
-            # Remove any accidental markdown syntax
-            clean_text = clean_text.replace("**", "").replace("*", "")
+            # Cleanly strip any accidental markdown formatting (asterisks, hashes, backticks)
+            for char in ["**", "*", "###", "##", "#", "`"]:
+                clean_text = clean_text.replace(char, "")
+            clean_text = clean_text.strip()
+
+            # Human-like typing simulation pacing
+            typing_delay = min(1.5, max(0.5, len(clean_text) * 0.008))
+            await asyncio.sleep(typing_delay)
+
             logger.info("Sending agent response to %s: %s", sender_phone, clean_text[:120])
             await send_text_message(recipient_phone=sender_phone, text=clean_text)
         else:
             # Fallback acknowledgment
             logger.warning("Sending fallback greeting to %s (%s)", profile_name, sender_phone)
             fallback_msg = (
-                f"Hello {profile_name}! Welcome to Al Astoora Agency. "
-                "How can we assist you today? We specialize in corporate secretarial, accounting, and immigration consulting."
+                f"Hello {profile_name}! Welcome to Al Astoora. "
+                "How can we assist you today? We specialize in B2B WhatsApp automation, document onboarding, and corporate services infrastructure."
             )
+            # Brief human pause
+            await asyncio.sleep(0.8)
             await send_text_message(recipient_phone=sender_phone, text=fallback_msg)
 
     except Exception as e:
@@ -354,3 +374,4 @@ async def process_message(message: ParsedMessage) -> None:
 
 
 root_agent = get_agent()
+

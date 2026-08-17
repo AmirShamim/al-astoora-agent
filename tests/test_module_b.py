@@ -9,6 +9,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.module_a.parser import ParsedMessage
+from app.module_b.whatsapp_sender import (
+    mark_message_as_read,
+    send_text_message,
+    send_button_message,
+    send_list_message,
+)
 from app.module_b.system_prompt import SYSTEM_PROMPT
 from app.module_b.tools import (
     ALL_TOOLS,
@@ -38,8 +44,12 @@ from app.module_b.agent import (
 # ==============================================================================
 
 def test_system_prompt_identity_and_services():
-    """System prompt must define Al Astoora identity, services, and document rules."""
+    """System prompt must define Al Astoora identity, services, pricing, and document rules."""
     assert "Al Astoora" in SYSTEM_PROMPT
+    assert "WhatsApp Business Automation" in SYSTEM_PROMPT
+    assert "Appointment & Booking Systems" in SYSTEM_PROMPT
+    assert "Document Collection" in SYSTEM_PROMPT
+    assert "Website & Client Portal Development" in SYSTEM_PROMPT
     assert "sg_company_registration" in SYSTEM_PROMPT
     assert "accounting_services" in SYSTEM_PROMPT
     assert "immigration_consulting" in SYSTEM_PROMPT
@@ -54,7 +64,7 @@ def test_system_prompt_identity_and_services():
 
 
 def test_system_prompt_whatsapp_constraints():
-    """System prompt must enforce WhatsApp constraints: no markdown, English, brevity."""
+    """System prompt must enforce WhatsApp constraints: no markdown, English, brevity, consultative tone."""
     assert "NO MARKDOWN" in SYSTEM_PROMPT or "Never use markdown" in SYSTEM_PROMPT
     assert "English" in SYSTEM_PROMPT
     assert "concise" in SYSTEM_PROMPT.lower() or "2 to 3 sentences" in SYSTEM_PROMPT
@@ -64,6 +74,7 @@ def test_system_prompt_tool_instructions():
     """System prompt must reference all tool functions."""
     for tool_fn in ALL_TOOLS:
         assert tool_fn.__name__ in SYSTEM_PROMPT
+
 
 
 # ==============================================================================
@@ -296,6 +307,40 @@ async def test_tool_send_whatsapp_list():
         )
 
 
+@pytest.mark.asyncio
+async def test_mark_message_as_read_success():
+    """Test mark_message_as_read posts read status to WhatsApp Cloud API."""
+    with patch("app.module_b.whatsapp_sender.get_settings") as mock_settings:
+        mock_settings.return_value.WHATSAPP_TOKEN = "test_token"
+        mock_settings.return_value.WHATSAPP_PHONE_NUMBER_ID = "1113443245192571"
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"success": True}
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_resp
+
+            res = await mark_message_as_read("wamid.HBgL123456")
+            assert res.get("success") is True
+            mock_post.assert_called_once()
+            call_kwargs = mock_post.call_args[1]
+            assert call_kwargs["json"]["status"] == "read"
+            assert call_kwargs["json"]["message_id"] == "wamid.HBgL123456"
+
+
+@pytest.mark.asyncio
+async def test_mark_message_as_read_missing_credentials():
+    """Test mark_message_as_read returns gracefully if credentials are not configured."""
+    with patch("app.module_b.whatsapp_sender.get_settings") as mock_settings:
+        mock_settings.return_value.WHATSAPP_TOKEN = ""
+        mock_settings.return_value.WHATSAPP_PHONE_NUMBER_ID = ""
+
+        res = await mark_message_as_read("wamid.123")
+        assert res.get("success") is False
+        assert res.get("mock") is True
+
+
 # ==============================================================================
 # 3. Agent Lifecycle & Prompt Construction Tests
 # ==============================================================================
@@ -358,12 +403,14 @@ async def test_process_message_text_reply_delivery():
     mock_agent.run = MagicMock(return_value="Hello Zayd! We would be delighted to help you incorporate in Singapore.")
 
     with patch("app.module_b.agent.get_agent", return_value=mock_agent):
-        with patch("app.module_b.agent.send_text_message", new_callable=AsyncMock) as mock_send:
-            await process_message(msg)
-            mock_send.assert_called_once_with(
-                recipient_phone="6591234567",
-                text="Hello Zayd! We would be delighted to help you incorporate in Singapore.",
-            )
+        with patch("app.module_b.agent.mark_message_as_read", new_callable=AsyncMock) as mock_read:
+            with patch("app.module_b.agent.send_text_message", new_callable=AsyncMock) as mock_send:
+                await process_message(msg)
+                mock_read.assert_called_once_with("wamid.text1")
+                mock_send.assert_called_once_with(
+                    recipient_phone="6591234567",
+                    text="Hello Zayd! We would be delighted to help you incorporate in Singapore.",
+                )
 
 
 @pytest.mark.asyncio
