@@ -131,6 +131,7 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
         from google import genai
         from google.genai import types
         from app.module_d.validator import get_genai_client
+        from app.module_c.sessions import get_session_history, append_session_message
 
         client = get_genai_client()
         settings = get_settings()
@@ -156,11 +157,27 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
             tools=func_declarations,
         )
 
-        contents = [prompt]
+        # 1. Load multi-turn session history for this sender
+        past_history = await get_session_history(message.sender_phone, max_messages=10)
+        contents = []
+        for past_msg in past_history:
+            role = past_msg.get("role", "user")
+            text = past_msg.get("text", "")
+            if text:
+                try:
+                    contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
+                except Exception:
+                    contents.append({"role": role, "parts": [{"text": text}]})
+
+        # 2. Append current user event prompt
+        try:
+            contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+        except Exception:
+            contents.append({"role": "user", "parts": [{"text": prompt}]})
 
         MAX_TURNS = 8
         for turn in range(MAX_TURNS):
-            logger.info("GenAI turn %d, contents length: %d", turn, len(contents))
+            logger.info("GenAI turn %d, contents length: %d (session history: %d)", turn, len(contents), len(past_history))
 
             response = None
             for model_name in candidate_models:
@@ -310,6 +327,12 @@ async def process_message(message: ParsedMessage) -> None:
                 clean_text = clean_text.replace(char, "")
             clean_text = clean_text.strip()
 
+            # Record turn into session history
+            from app.module_c.sessions import append_session_message
+            user_text = message.message_content or f"[{message.message_type}]"
+            await append_session_message(sender_phone, "user", user_text)
+            await append_session_message(sender_phone, "model", clean_text)
+
             # Human-like typing simulation pacing
             typing_delay = min(1.5, max(0.5, len(clean_text) * 0.008))
             await asyncio.sleep(typing_delay)
@@ -320,6 +343,11 @@ async def process_message(message: ParsedMessage) -> None:
             # Fallback acknowledgment (1-2 sentences)
             logger.warning("Sending fallback greeting to %s (%s)", profile_name, sender_phone)
             fallback_msg = f"Hi {profile_name}! Welcome to Al Astoora. How can we help automate or streamline your business operations today?"
+            from app.module_c.sessions import append_session_message
+            user_text = message.message_content or f"[{message.message_type}]"
+            await append_session_message(sender_phone, "user", user_text)
+            await append_session_message(sender_phone, "model", fallback_msg)
+
             # Brief human pause
             await asyncio.sleep(0.5)
             await send_text_message(recipient_phone=sender_phone, text=fallback_msg)

@@ -30,6 +30,11 @@ from app.module_c.bookings import (
     get_client_bookings,
     DEFAULT_SLOTS,
 )
+from app.module_c.sessions import (
+    get_session_history,
+    append_session_message,
+    clear_session,
+)
 
 __all__ = [
     "get_firestore_client",
@@ -49,4 +54,7 @@ __all__ = [
     "cancel_appointment",
     "get_client_bookings",
     "DEFAULT_SLOTS",
+    "get_session_history",
+    "append_session_message",
+    "clear_session",
 ]
