@@ -33,10 +33,13 @@ logger = logging.getLogger(__name__)
 # Attempt importing Agent from Google ADK
 try:
     from google.adk import Agent
+    logger.info("Loaded Agent from google.adk")
 except ImportError:
     try:
         from google.adk.agents import Agent
+        logger.info("Loaded Agent from google.adk.agents")
     except ImportError:
+        logger.warning("Google ADK Agent not available — will use direct GenAI fallback")
         # Fallback dummy class if ADK is mocked or running in minimal test environment
         class Agent:  # type: ignore
             def __init__(self, name: str, model: str, instruction: str, tools: Optional[List[Any]] = None):
@@ -111,11 +114,13 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
     """
     # 1. If agent has async run method
     if hasattr(agent, "run_async") and callable(agent.run_async):
+        logger.info("Using ADK Agent.run_async path")
         res = await agent.run_async(prompt)
         return str(res) if res is not None else None
 
     # 2. If agent has synchronous or callable run method
     if hasattr(agent, "run") and callable(agent.run):
+        logger.info("Using ADK Agent.run path")
         res = agent.run(prompt)
         if inspect.isawaitable(res):
             res = await res
@@ -123,12 +128,14 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
 
     # 3. If agent is a custom callable / mock
     if callable(agent):
+        logger.info("Using callable agent path")
         res = agent(prompt)
         if inspect.isawaitable(res):
             res = await res
         return str(res) if res is not None else None
 
     # 4. Direct GenAI model invocation fallback with multi-turn tool loop
+    logger.info("Using direct GenAI fallback path (ADK agent has no run/run_async)")
     try:
         from google import genai
         from google.genai import types
@@ -140,17 +147,28 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
 
         tool_map = {t.__name__: t for t in ALL_TOOLS}
 
+        # Build function declarations manually for robust compatibility
+        func_declarations = []
+        for tool_fn in ALL_TOOLS:
+            try:
+                func_declarations.append(tool_fn)
+            except Exception as td_err:
+                logger.warning("Could not add tool %s: %s", tool_fn.__name__, td_err)
+
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             temperature=0.2,
-            tools=ALL_TOOLS,
+            tools=func_declarations,
         )
 
-        # Multi-turn conversation history
-        contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+        # Multi-turn conversation history — use plain string for first turn
+        # (most compatible with all google-genai SDK versions)
+        contents = [prompt]
 
         MAX_TURNS = 8  # Safety limit to prevent infinite loops
         for turn in range(MAX_TURNS):
+            logger.info("GenAI fallback turn %d, contents length: %d", turn, len(contents))
+
             if hasattr(client, "aio") and hasattr(client.aio, "models"):
                 response = await client.aio.models.generate_content(
                     model=model_name, contents=contents, config=config,
@@ -164,9 +182,21 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
             # Check for function calls in the response
             candidates = getattr(response, "candidates", [])
             has_function_calls = False
-            function_responses = []
+            function_response_parts = []
 
             if candidates and hasattr(candidates[0], "content") and hasattr(candidates[0].content, "parts"):
+                # For multi-turn: rebuild contents as structured Content list
+                if turn == 0 and isinstance(contents[0], str):
+                    # Convert first entry from string to Content object
+                    try:
+                        contents = [
+                            types.Content(role="user", parts=[types.Part(text=prompt)])
+                        ]
+                    except Exception:
+                        contents = [
+                            {"role": "user", "parts": [{"text": prompt}]}
+                        ]
+
                 # Append the model's response to conversation history
                 contents.append(candidates[0].content)
 
@@ -181,32 +211,53 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
                         # Execute the tool
                         tool_result = "Tool not found"
                         if fn_name in tool_map:
-                            target_tool = tool_map[fn_name]
-                            tool_result = target_tool(**fn_args)
-                            if inspect.isawaitable(tool_result):
-                                tool_result = await tool_result
-                            logger.info("Tool %s result: %s", fn_name, str(tool_result)[:200])
+                            try:
+                                target_tool = tool_map[fn_name]
+                                tool_result = target_tool(**fn_args)
+                                if inspect.isawaitable(tool_result):
+                                    tool_result = await tool_result
+                                logger.info("Tool %s result: %s", fn_name, str(tool_result)[:200])
+                            except Exception as tool_err:
+                                logger.exception("Tool %s execution failed: %s", fn_name, tool_err)
+                                tool_result = f"Tool execution error: {str(tool_err)}"
 
-                        # Build FunctionResponse to send result back to model
-                        function_responses.append(
-                            types.Part.from_function_response(
+                        # Build FunctionResponse — try SDK method, fall back to dict
+                        try:
+                            fr_part = types.Part.from_function_response(
                                 name=fn_name,
                                 response={"result": str(tool_result)},
                             )
-                        )
+                        except (AttributeError, TypeError):
+                            try:
+                                fr_part = types.Part(
+                                    function_response=types.FunctionResponse(
+                                        name=fn_name,
+                                        response={"result": str(tool_result)},
+                                    )
+                                )
+                            except Exception:
+                                fr_part = {"function_response": {"name": fn_name, "response": {"result": str(tool_result)}}}
 
-            if has_function_calls and function_responses:
+                        function_response_parts.append(fr_part)
+
+            if has_function_calls and function_response_parts:
                 # Append tool results and loop for the next model turn
-                contents.append(types.Content(role="user", parts=function_responses))
+                try:
+                    tool_content = types.Content(role="user", parts=function_response_parts)
+                except Exception:
+                    tool_content = {"role": "user", "parts": function_response_parts}
+                contents.append(tool_content)
                 continue
 
             # No more tool calls — return the text response
-            return getattr(response, "text", None)
+            text_result = getattr(response, "text", None)
+            logger.info("GenAI fallback produced text (turn %d): %s", turn, str(text_result)[:200] if text_result else "None")
+            return text_result
 
         logger.warning("Agent exceeded max %d turns without producing a text response", MAX_TURNS)
         return None
     except Exception as e:
-        logger.warning("Direct GenAI client turn encountered: %s", e)
+        logger.exception("Direct GenAI client fallback FAILED: %s", e)
         return None
 
 
@@ -243,6 +294,19 @@ async def process_message(message: ParsedMessage) -> None:
             clean_text = clean_text.replace("**", "").replace("*", "")
             logger.info("Sending agent response to %s: %s", sender_phone, clean_text[:120])
             await send_text_message(recipient_phone=sender_phone, text=clean_text)
+        else:
+            # Agent returned None or empty — send a graceful acknowledgment
+            # so the user is NEVER left without a reply
+            logger.warning(
+                "Agent returned no text for %s (%s). Sending fallback acknowledgment.",
+                profile_name, sender_phone,
+            )
+            fallback_msg = (
+                f"Hello {profile_name}! Thank you for reaching out to Al Astoora. "
+                "We received your message and are processing it. "
+                "How can we assist you today? We offer company registration, accounting, and immigration services."
+            )
+            await send_text_message(recipient_phone=sender_phone, text=fallback_msg)
 
     except Exception as e:
         logger.exception("Critical failure during agent processing for %s: %s", sender_phone, e)
