@@ -25,12 +25,12 @@ class Settings(BaseSettings):
 
     # Google Cloud Platform
     GCP_PROJECT_ID: str = "project-080b5971-eb4b-4d2b-a4c"
-    GCP_LOCATION: str = "us-central1"
+    GCP_LOCATION: str = "asia-south1"
     GCS_BUCKET_NAME: str = "al-astoora-documents"
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
 
     # Model & AI Configuration
-    GEMINI_MODEL: str = "gemini-3.6-flash"
+    GEMINI_MODEL: str = "gemini-3.7-flash"
     GEMINI_LOCATION: str = "global"
 
     # App Environment
