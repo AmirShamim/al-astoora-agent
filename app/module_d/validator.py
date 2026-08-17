@@ -208,9 +208,9 @@ async def analyze_document_with_gemini(
             temperature=0.1,
         )
 
-        configured_model = settings.GEMINI_MODEL or "gemini-2.0-flash"
+        configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
         candidate_models = [configured_model]
-        for fallback in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+        for fallback in ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash"]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 

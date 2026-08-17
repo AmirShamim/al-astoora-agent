@@ -61,7 +61,7 @@ def create_adk_agent() -> Any:
     Configured with Gemini, system prompt, and all Module C/D tools.
     """
     settings = get_settings()
-    model_name = settings.GEMINI_MODEL or "gemini-2.0-flash"
+    model_name = settings.GEMINI_MODEL or "gemini-3.7-flash"
     logger.info("Initializing Google ADK Agent 'al_astoora_agent' with model: %s", model_name)
 
     agent = Agent(
@@ -184,10 +184,10 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
 
         client = get_genai_client()
         settings = get_settings()
-        configured_model = settings.GEMINI_MODEL or "gemini-2.0-flash"
+        configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
         # Support fallback models in order of priority
         candidate_models = [configured_model]
-        for fallback in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+        for fallback in ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash"]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 

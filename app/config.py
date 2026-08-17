@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
 
     # Model & AI Configuration
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3.7-flash"
     GEMINI_LOCATION: str = "us-central1"
 
     # App Environment
