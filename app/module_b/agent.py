@@ -120,63 +120,13 @@ Follow the consultative workflow for Al Astoora B2B Infrastructure:
 
 async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -> Tuple[Optional[str], bool]:
     """
-    Executes an agent reasoning and tool invocation turn with Google ADK or fallback runner.
+    Executes an agent reasoning and tool invocation turn using Google GenAI SDK with multi-turn tool loop.
     Returns:
         tuple (response_text: Optional[str], message_already_sent_via_tool: bool)
     """
     dispatched_via_tool = False
 
-    # 1. If agent has async run method
-    if hasattr(agent, "run_async") and callable(agent.run_async):
-        logger.info("Using ADK Agent.run_async path")
-        try:
-            res_obj = agent.run_async(prompt)
-            # Check if it returns an async generator
-            if hasattr(res_obj, "__aiter__"):
-                accumulated_text = []
-                async for event in res_obj:
-                    if isinstance(event, str):
-                        accumulated_text.append(event)
-                    elif hasattr(event, "text") and event.text:
-                        accumulated_text.append(str(event.text))
-                    elif hasattr(event, "content"):
-                        accumulated_text.append(str(event.content))
-                    else:
-                        accumulated_text.append(str(event))
-                final_text = "".join(accumulated_text).strip()
-                return (final_text if final_text else None, False)
-            elif inspect.isawaitable(res_obj):
-                res = await res_obj
-                return (str(res) if res is not None else None, False)
-            else:
-                return (str(res_obj) if res_obj is not None else None, False)
-        except Exception as adk_err:
-            logger.warning("ADK Agent.run_async error, will try next execution path: %s", adk_err)
-
-    # 2. If agent has synchronous or callable run method
-    if hasattr(agent, "run") and callable(agent.run):
-        logger.info("Using ADK Agent.run path")
-        try:
-            res = agent.run(prompt)
-            if inspect.isawaitable(res):
-                res = await res
-            return (str(res) if res is not None else None, False)
-        except Exception as adk_run_err:
-            logger.warning("ADK Agent.run error, will try next execution path: %s", adk_run_err)
-
-    # 3. If agent is a custom callable / mock
-    if callable(agent):
-        logger.info("Using callable agent path")
-        try:
-            res = agent(prompt)
-            if inspect.isawaitable(res):
-                res = await res
-            return (str(res) if res is not None else None, False)
-        except Exception as call_err:
-            logger.warning("Callable agent error, falling back to GenAI: %s", call_err)
-
-    # 4. Direct GenAI model invocation fallback with multi-turn tool loop
-    logger.info("Using direct GenAI fallback path")
+    # Direct GenAI model invocation with multi-turn tool loop
     try:
         from google import genai
         from google.genai import types
