@@ -128,7 +128,7 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
             res = await res
         return str(res) if res is not None else None
 
-    # 4. Direct GenAI model invocation fallback with tools
+    # 4. Direct GenAI model invocation fallback with multi-turn tool loop
     try:
         from google import genai
         from google.genai import types
@@ -136,6 +136,9 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
 
         client = get_genai_client()
         settings = get_settings()
+        model_name = settings.GEMINI_MODEL or "gemini-3.7-flash"
+
+        tool_map = {t.__name__: t for t in ALL_TOOLS}
 
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -143,40 +146,65 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
             tools=ALL_TOOLS,
         )
 
-        model_name = settings.GEMINI_MODEL or "gemini-3.7-flash"
-        if hasattr(client, "aio") and hasattr(client.aio, "models"):
-            response = await client.aio.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=config,
-            )
-        else:
-            res = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=config,
-            )
-            response = await res if inspect.isawaitable(res) else res
+        # Multi-turn conversation history
+        contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
-        # Check for function calls / tool calls
-        candidates = getattr(response, "candidates", [])
-        if candidates and hasattr(candidates[0], "content") and hasattr(candidates[0].content, "parts"):
-            for part in candidates[0].content.parts:
-                fn_call = getattr(part, "function_call", None)
-                if fn_call:
-                    fn_name = getattr(fn_call, "name", "")
-                    fn_args = getattr(fn_call, "args", {}) or {}
-                    logger.info("Agent requested tool call: %s with args: %s", fn_name, fn_args)
-                    # Find tool in ALL_TOOLS
-                    tool_map = {t.__name__: t for t in ALL_TOOLS}
-                    if fn_name in tool_map:
-                        target_tool = tool_map[fn_name]
-                        tool_res = target_tool(**fn_args)
-                        if inspect.isawaitable(tool_res):
-                            tool_res = await tool_res
-                        logger.info("Tool %s completed: %s", fn_name, str(tool_res)[:200])
+        MAX_TURNS = 8  # Safety limit to prevent infinite loops
+        for turn in range(MAX_TURNS):
+            if hasattr(client, "aio") and hasattr(client.aio, "models"):
+                response = await client.aio.models.generate_content(
+                    model=model_name, contents=contents, config=config,
+                )
+            else:
+                res = client.models.generate_content(
+                    model=model_name, contents=contents, config=config,
+                )
+                response = await res if inspect.isawaitable(res) else res
 
-        return getattr(response, "text", None)
+            # Check for function calls in the response
+            candidates = getattr(response, "candidates", [])
+            has_function_calls = False
+            function_responses = []
+
+            if candidates and hasattr(candidates[0], "content") and hasattr(candidates[0].content, "parts"):
+                # Append the model's response to conversation history
+                contents.append(candidates[0].content)
+
+                for part in candidates[0].content.parts:
+                    fn_call = getattr(part, "function_call", None)
+                    if fn_call:
+                        has_function_calls = True
+                        fn_name = getattr(fn_call, "name", "")
+                        fn_args = dict(getattr(fn_call, "args", {}) or {})
+                        logger.info("Agent tool call [turn %d]: %s(%s)", turn, fn_name, fn_args)
+
+                        # Execute the tool
+                        tool_result = "Tool not found"
+                        if fn_name in tool_map:
+                            target_tool = tool_map[fn_name]
+                            tool_result = target_tool(**fn_args)
+                            if inspect.isawaitable(tool_result):
+                                tool_result = await tool_result
+                            logger.info("Tool %s result: %s", fn_name, str(tool_result)[:200])
+
+                        # Build FunctionResponse to send result back to model
+                        function_responses.append(
+                            types.Part.from_function_response(
+                                name=fn_name,
+                                response={"result": str(tool_result)},
+                            )
+                        )
+
+            if has_function_calls and function_responses:
+                # Append tool results and loop for the next model turn
+                contents.append(types.Content(role="user", parts=function_responses))
+                continue
+
+            # No more tool calls — return the text response
+            return getattr(response, "text", None)
+
+        logger.warning("Agent exceeded max %d turns without producing a text response", MAX_TURNS)
+        return None
     except Exception as e:
         logger.warning("Direct GenAI client turn encountered: %s", e)
         return None

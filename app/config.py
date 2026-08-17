@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Model & AI Configuration
     GEMINI_MODEL: str = "gemini-3.7-flash"
-    GEMINI_LOCATION: str = "global"
+    GEMINI_LOCATION: str = "us-central1"
 
     # App Environment
     APP_ENV: str = "development"
