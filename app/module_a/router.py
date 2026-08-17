@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Webhook"])
 
+import time
+from collections import OrderedDict
+
+# In-memory deduplication cache for message IDs (max 1000 items, expires old)
+_PROCESSED_MESSAGE_IDS: OrderedDict[str, float] = OrderedDict()
+_DEDUP_MAX_ENTRIES = 1000
+_DEDUP_TTL_SECONDS = 300  # 5 minutes
+
 # Message handler callback registry (allows Module B / main app to inject agent processing)
 _message_handler: Optional[Callable[[ParsedMessage], Awaitable[None]]] = None
 
@@ -96,9 +104,24 @@ async def receive_webhook(
         logger.info(f"Filtered out self-reply message from bot number ({parsed.sender_phone}).")
         return {"status": "ignored_self_reply"}
 
+    # 4. Filter: Deduplicate WhatsApp retries
+    if parsed.raw_message_id:
+        current_time = time.time()
+        # Clean expired entries
+        while _PROCESSED_MESSAGE_IDS and next(iter(_PROCESSED_MESSAGE_IDS.values())) < current_time - _DEDUP_TTL_SECONDS:
+            _PROCESSED_MESSAGE_IDS.popitem(last=False)
+
+        if parsed.raw_message_id in _PROCESSED_MESSAGE_IDS:
+            logger.info(f"Ignored duplicate WhatsApp message event [ID: {parsed.raw_message_id}]")
+            return {"status": "ignored_duplicate"}
+
+        _PROCESSED_MESSAGE_IDS[parsed.raw_message_id] = current_time
+        if len(_PROCESSED_MESSAGE_IDS) > _DEDUP_MAX_ENTRIES:
+            _PROCESSED_MESSAGE_IDS.popitem(last=False)
+
     logger.info(f"Incoming message from {parsed.profile_name} ({parsed.sender_phone}) [type: {parsed.message_type}]")
 
-    # 4. Asynchronous Handoff: Process via registered agent or fallback in background
+    # 5. Asynchronous Handoff: Process via registered agent or fallback in background
     handler = _message_handler or _default_fallback_processor
     background_tasks.add_task(handler, parsed)
 
