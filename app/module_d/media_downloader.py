@@ -11,12 +11,14 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-GRAPH_API_VERSION = "v20.0"
+GRAPH_API_VERSION = "v26.0"
 
 
 def _get_media_meta_url(media_id: str) -> str:
     """Returns the WhatsApp Graph API URL for querying media metadata."""
-    return f"https://graph.facebook.com/{GRAPH_API_VERSION}/{media_id}"
+    settings = get_settings()
+    api_version = getattr(settings, "GRAPH_API_VERSION", GRAPH_API_VERSION) or GRAPH_API_VERSION
+    return f"https://graph.facebook.com/{api_version}/{media_id}"
 
 
 def _get_auth_headers() -> Dict[str, str]:

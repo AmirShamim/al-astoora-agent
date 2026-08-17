@@ -12,7 +12,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-GRAPH_API_VERSION = "v20.0"
+GRAPH_API_VERSION = "v26.0"
 
 _HTTP_CLIENT: Optional[httpx.AsyncClient] = None
 
@@ -36,7 +36,9 @@ def get_http_client() -> httpx.AsyncClient:
 
 
 def _build_messages_url(phone_number_id: str) -> str:
-    return f"https://graph.facebook.com/{GRAPH_API_VERSION}/{phone_number_id}/messages"
+    settings = get_settings()
+    api_version = getattr(settings, "GRAPH_API_VERSION", GRAPH_API_VERSION) or GRAPH_API_VERSION
+    return f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages"
 
 
 def _build_auth_headers(token: str) -> Dict[str, str]:

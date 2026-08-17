@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     WHATSAPP_PHONE_NUMBER_ID: str = "1113443245192571"
     BOT_PHONE_NUMBER: str = "919289581053"
     WEBHOOK_VERIFY_TOKEN: str = "al_astoora_secure_verify_token_2026"
+    GRAPH_API_VERSION: str = "v26.0"
 
     # Google Cloud Platform
     GCP_PROJECT_ID: str = "project-080b5971-eb4b-4d2b-a4c"

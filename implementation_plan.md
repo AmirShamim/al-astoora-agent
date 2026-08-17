@@ -25,7 +25,7 @@
 | State Database | Firestore Native Mode | `google-cloud-firestore` |
 | File Storage | Cloud Storage | `google-cloud-storage` |
 | Hosting | Google Cloud Run | Docker container (python:3.11-slim) |
-| WhatsApp API | Meta Cloud API v20.0 | via `httpx` async |
+| WhatsApp API | Meta Cloud API v26.0 | via `httpx` async |
 | Config | Pydantic Settings | `pydantic-settings` |
 
 ---
@@ -34,7 +34,7 @@
 
 ```
 GCP_PROJECT_ID    = project-080b5971-eb4b-4d2b-a4c
-GCP_LOCATION      = us-central1
+GCP_LOCATION      = asia-south1
 GCS_BUCKET_NAME   = al-astoora-documents
 SERVICE_ACCOUNT   = ai-agent-n8n@project-080b5971-eb4b-4d2b-a4c.iam.gserviceaccount.com
 GEMINI_MODEL      = gemini-3.7-flash
@@ -49,7 +49,7 @@ CLOUD_RUN_URL     = https://al-astoora-agent-1019975245319.us-central1.run.app
 WHATSAPP_PHONE_NUMBER_ID  = 1113443245192571
 BOT_PHONE_NUMBER          = 919289581053
 WEBHOOK_VERIFY_TOKEN      = al_astoora_secure_verify_token_2026
-GRAPH_API_VERSION         = v20.0
+GRAPH_API_VERSION         = v26.0
 ```
 
 ---
