@@ -317,14 +317,11 @@ async def process_message(message: ParsedMessage) -> None:
             logger.info("Sending agent response to %s: %s", sender_phone, clean_text[:120])
             await send_text_message(recipient_phone=sender_phone, text=clean_text)
         else:
-            # Fallback acknowledgment
+            # Fallback acknowledgment (1-2 sentences)
             logger.warning("Sending fallback greeting to %s (%s)", profile_name, sender_phone)
-            fallback_msg = (
-                f"Hello {profile_name}! Welcome to Al Astoora. "
-                "How can we assist you today? We specialize in B2B WhatsApp automation, document onboarding, and corporate services infrastructure."
-            )
+            fallback_msg = f"Hi {profile_name}! Welcome to Al Astoora. How can we help automate or streamline your business operations today?"
             # Brief human pause
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.5)
             await send_text_message(recipient_phone=sender_phone, text=fallback_msg)
 
     except Exception as e:
