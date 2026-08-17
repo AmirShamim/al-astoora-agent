@@ -208,28 +208,38 @@ async def analyze_document_with_gemini(
             temperature=0.1,
         )
 
-        model_name = settings.GEMINI_MODEL
+        configured_model = settings.GEMINI_MODEL or "gemini-2.0-flash"
+        candidate_models = [configured_model]
+        for fallback in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
 
-        # Handle async execution via client.aio or fallback
-        if hasattr(client, "aio") and hasattr(client.aio, "models") and hasattr(client.aio.models, "generate_content"):
-            response = await client.aio.models.generate_content(
-                model=model_name,
-                contents=[file_part, prompt],
-                config=config,
-            )
-        elif hasattr(client, "models") and hasattr(client.models, "generate_content"):
-            # Offload synchronous model call or await if returned a coroutine
-            res = client.models.generate_content(
-                model=model_name,
-                contents=[file_part, prompt],
-                config=config,
-            )
-            if hasattr(res, "__await__"):
-                response = await res
-            else:
-                response = res
-        else:
-            raise AttributeError("GenAI client does not have models.generate_content interface")
+        response = None
+        for model_name in candidate_models:
+            try:
+                if hasattr(client, "aio") and hasattr(client.aio, "models") and hasattr(client.aio.models, "generate_content"):
+                    response = await client.aio.models.generate_content(
+                        model=model_name,
+                        contents=[file_part, prompt],
+                        config=config,
+                    )
+                elif hasattr(client, "models") and hasattr(client.models, "generate_content"):
+                    res = client.models.generate_content(
+                        model=model_name,
+                        contents=[file_part, prompt],
+                        config=config,
+                    )
+                    if hasattr(res, "__await__"):
+                        response = await res
+                    else:
+                        response = res
+                if response is not None:
+                    break
+            except Exception as model_err:
+                logger.warning("Vision GenAI model '%s' failed: %s. Trying next...", model_name, model_err)
+
+        if response is None:
+            raise RuntimeError("All candidate multimodal models failed.")
 
         raw_text = getattr(response, "text", "") or ""
         logger.info("Gemini multimodal response for doc_type '%s': %s", expected_doc_type, raw_text[:200])

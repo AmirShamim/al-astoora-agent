@@ -61,7 +61,7 @@ def create_adk_agent() -> Any:
     Configured with Gemini, system prompt, and all Module C/D tools.
     """
     settings = get_settings()
-    model_name = settings.GEMINI_MODEL or "gemini-3.6-flash"
+    model_name = settings.GEMINI_MODEL or "gemini-2.0-flash"
     logger.info("Initializing Google ADK Agent 'al_astoora_agent' with model: %s", model_name)
 
     agent = Agent(
@@ -184,7 +184,12 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
 
         client = get_genai_client()
         settings = get_settings()
-        model_name = settings.GEMINI_MODEL or "gemini-3.6-flash"
+        configured_model = settings.GEMINI_MODEL or "gemini-2.0-flash"
+        # Support fallback models in order of priority
+        candidate_models = [configured_model]
+        for fallback in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
 
         tool_map = {t.__name__: t for t in ALL_TOOLS}
 
@@ -207,15 +212,26 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
         for turn in range(MAX_TURNS):
             logger.info("GenAI turn %d, contents length: %d", turn, len(contents))
 
-            if hasattr(client, "aio") and hasattr(client.aio, "models"):
-                response = await client.aio.models.generate_content(
-                    model=model_name, contents=contents, config=config,
-                )
-            else:
-                res = client.models.generate_content(
-                    model=model_name, contents=contents, config=config,
-                )
-                response = await res if inspect.isawaitable(res) else res
+            response = None
+            for model_name in candidate_models:
+                try:
+                    if hasattr(client, "aio") and hasattr(client.aio, "models"):
+                        response = await client.aio.models.generate_content(
+                            model=model_name, contents=contents, config=config,
+                        )
+                    else:
+                        res = client.models.generate_content(
+                            model=model_name, contents=contents, config=config,
+                        )
+                        response = await res if inspect.isawaitable(res) else res
+                    if response is not None:
+                        break
+                except Exception as model_err:
+                    logger.warning("GenAI model '%s' failed: %s. Trying next candidate...", model_name, model_err)
+
+            if response is None:
+                logger.error("All candidate GenAI models failed.")
+                break
 
             candidates = getattr(response, "candidates", [])
             has_function_calls = False
