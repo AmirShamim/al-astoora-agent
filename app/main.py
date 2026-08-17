@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.module_a.router import router as webhook_router
+from app.module_a.router import router as webhook_router, register_message_handler
+from app.module_b.agent import process_message
 
 # Configure structured logging
 settings = get_settings()
@@ -21,6 +22,9 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("al_astoora_agent")
+
+# Register Module B Agent message handler with Module A webhook router
+register_message_handler(process_message)
 
 
 @asynccontextmanager
@@ -32,6 +36,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"   GCP Project: {settings.GCP_PROJECT_ID}")
     logger.info(f"   Gemini Model: {settings.GEMINI_MODEL}")
     logger.info("=" * 60)
+    # Ensure message handler registration is affirmed on startup
+    register_message_handler(process_message)
     yield
     logger.info("🛑 Al Astoora Agent shutting down.")
 
