@@ -53,8 +53,9 @@ CONVERSATIONAL_PHASES = """=====================================================
 - Phase 1 (Greeting / Inquiries): Greet warmly in 1-2 sentences on first contact. Silently call `capture_lead`.
 - Phase 2 (Interest/Pricing): Answer directly in 1-2 sentences with price range, then offer a quick discovery call.
 - Phase 3 (Meeting / Demo / Booking):
-  * When user agrees to a call or asks for available times, call `send_interactive_booking_slots` or `check_available_slots` to present selectable slots.
-  * When user specifies a date & time (e.g. "tomorrow 12 pm"), call `book_appointment` directly.
+  * When user agrees to a call or asks for available times, ALWAYS call `send_booking_buttons` (for 3 quick tap buttons) or `send_interactive_booking_slots` (for full selectable list) directly to WhatsApp.
+  * DO NOT list times as raw plain text if you can send interactive buttons or list.
+  * When user specifies a date & time or taps a slot button, call `book_appointment` directly to confirm.
 - Phase 4 (Onboarding / Docs): ONLY when the client confirms onboarding, call `get_or_create_client` and request ONLY the first document.
 - Phase 5 (Document Upload): When an image/doc is sent, call `validate_document` and give a 1-sentence friendly confirmation or clear feedback."""
 
@@ -63,8 +64,9 @@ TOOL_DIRECTIVES = """===========================================================
 4. TOOL EXECUTION RULES
 ================================================================================
 - `capture_lead`: Call automatically when user shares name/inquiry (do not duplicate if already captured).
-- `send_interactive_booking_slots`: Call to send selectable WhatsApp slot options when scheduling a meeting.
-- `check_available_slots`: Call when user asks for available appointment times.
+- `send_booking_buttons`: Call to send 3 quick-tap interactive WhatsApp buttons when proposing consultation times.
+- `send_interactive_booking_slots`: Call to send full selectable WhatsApp slot list when scheduling a meeting.
+- `check_available_slots`: Call when checking available appointment times.
 - `book_appointment`: Call when booking or confirming a meeting with date and time.
 - `get_or_create_client`: Call when starting onboarding.
 - `validate_document`: Call when media is uploaded.

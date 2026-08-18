@@ -244,19 +244,105 @@ async def check_available_slots(date: str = "tomorrow") -> str:
         return "Could not check available slots due to a temporary issue."
 
 
-async def send_interactive_booking_slots(recipient_phone: str, date: str = "tomorrow") -> str:
+async def send_booking_buttons(
+    recipient_phone: Optional[str] = None,
+    phone: Optional[str] = None,
+    date: str = "tomorrow",
+) -> str:
     """
-    Sends an interactive WhatsApp list message displaying available 30-minute discovery call slots
-    directly to the user for one-tap selection. Automatically excludes already booked slots.
-    Call this when the user wants to schedule a call or asks for available meeting times.
+    Sends 3 quick-tap interactive WhatsApp buttons with popular discovery call slots
+    (e.g. Morning 09:00 AM, Midday 12:00 PM, Afternoon 03:00 PM) for one-tap booking.
+    Call this when the user agrees to schedule a meeting or asks for quick times.
 
     Args:
         recipient_phone: Client's phone number with country code.
+        phone: Alternative parameter for client's phone number.
+        date: Target appointment date (e.g. 'tomorrow', 'today', '2026-08-20', 'Friday').
+
+    Returns:
+        Status string confirming dispatch of interactive buttons.
+    """
+    target_phone = recipient_phone or phone
+    if not target_phone:
+        return "Error: Missing recipient phone number for sending interactive buttons."
+
+    try:
+        from app.module_c.bookings import check_available_slots as _check_slots
+        from app.module_b.whatsapp_sender import send_button_message
+
+        result = await _check_slots(date=date)
+        date_iso = result.get("date", date)
+        friendly_date = result.get("friendly_date", date)
+        available_slots = result.get("available_slots", [])
+
+        if not available_slots:
+            return f"Notice: No open slots available on {friendly_date}. Please ask the client for another preferred date."
+
+        # Pick up to 3 well-spaced slots (e.g. morning, midday, afternoon)
+        selected_slots = []
+        preferred_keys = ["09:00", "12:00", "15:00", "10:00", "14:00", "16:00", "11:00", "17:00", "13:00"]
+        for p_key in preferred_keys:
+            if p_key in available_slots and p_key not in selected_slots:
+                selected_slots.append(p_key)
+            if len(selected_slots) >= 3:
+                break
+
+        # Fallback to first 3 available if preferred keys not found
+        if not selected_slots:
+            selected_slots = available_slots[:3]
+
+        buttons = []
+        for slot_key in selected_slots:
+            sh, sm = map(int, slot_key.split(":"))
+            hour_12 = sh if 1 <= sh <= 12 else (sh - 12 if sh > 12 else 12)
+            ampm = "AM" if sh < 12 else "PM"
+            btn_title = f"{hour_12}:{sm:02d} {ampm}"
+            buttons.append({
+                "id": f"book_{date_iso}_{slot_key}",
+                "title": btn_title[:20],
+            })
+
+        body_text = f"Please select a time slot for our 30-min discovery call on {friendly_date}:"
+
+        res = await send_button_message(
+            recipient_phone=target_phone,
+            body_text=body_text,
+            buttons=buttons,
+            header_text="Discovery Call Booking",
+            footer_text="Al Astoora B2B Consultations",
+        )
+
+        if res.get("success"):
+            return f"Sent interactive booking buttons for {friendly_date} to {target_phone}."
+        return f"Notice: Interactive button dispatch returned {res.get('error', 'error')}."
+
+    except Exception as e:
+        logger.exception("Error in send_booking_buttons tool: %s", e)
+        return f"Failed to send interactive buttons: {str(e)}"
+
+
+async def send_interactive_booking_slots(
+    recipient_phone: Optional[str] = None,
+    phone: Optional[str] = None,
+    date: str = "tomorrow",
+) -> str:
+    """
+    Sends an interactive WhatsApp list message displaying all available 30-minute discovery call slots
+    directly to the user for one-tap selection. Automatically excludes already booked slots.
+    Call this when the user wants to view all available meeting times or schedule a call.
+
+    Args:
+        recipient_phone: Client's phone number with country code.
+        phone: Alternative parameter for client's phone number.
         date: Target appointment date (e.g. 'tomorrow', 'today', '2026-08-20', 'Friday').
 
     Returns:
         Status string confirming dispatch of interactive slot list.
     """
+    target_phone = recipient_phone or phone
+    if not target_phone:
+        return "Error: Missing recipient phone number for sending interactive list."
+
     try:
         from app.module_c.bookings import check_available_slots as _check_slots
         from app.module_b.whatsapp_sender import send_list_message
@@ -287,7 +373,7 @@ async def send_interactive_booking_slots(recipient_phone: str, date: str = "tomo
         )
 
         res = await send_list_message(
-            recipient_phone=recipient_phone,
+            recipient_phone=target_phone,
             body_text=body_text,
             button_text="Select Time Slot",
             sections=sections,
@@ -296,7 +382,7 @@ async def send_interactive_booking_slots(recipient_phone: str, date: str = "tomo
         )
 
         if res.get("success"):
-            return f"Sent interactive slot picker for {friendly_date} ({len(rows)} slots available) to {recipient_phone}."
+            return f"Sent interactive slot picker for {friendly_date} ({len(rows)} slots available) to {target_phone}."
         return f"Notice: Interactive dispatch returned {res.get('error', 'error')}."
 
     except Exception as e:
@@ -449,6 +535,7 @@ ALL_TOOLS = [
     update_document_status,
     validate_document,
     check_available_slots,
+    send_booking_buttons,
     send_interactive_booking_slots,
     book_appointment,
     send_whatsapp_text,

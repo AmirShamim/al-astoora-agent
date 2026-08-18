@@ -280,6 +280,30 @@ async def test_tool_send_interactive_booking_slots():
 
 
 @pytest.mark.asyncio
+async def test_tool_send_booking_buttons():
+    """Test send_booking_buttons tool sends 3 quick interactive buttons."""
+    from app.module_b.tools import send_booking_buttons
+
+    with patch("app.module_c.bookings.check_available_slots", new_callable=AsyncMock) as mock_slots:
+        with patch("app.module_b.whatsapp_sender.send_button_message", new_callable=AsyncMock) as mock_send_btn:
+            mock_slots.return_value = {
+                "success": True,
+                "date": "2026-08-20",
+                "friendly_date": "Thursday, August 20, 2026",
+                "available_slots": ["09:00", "12:00", "15:00"],
+            }
+            mock_send_btn.return_value = {"success": True}
+
+            res = await send_booking_buttons(recipient_phone="6591234567", date="2026-08-20")
+            assert "Sent interactive booking buttons" in res
+            mock_send_btn.assert_called_once()
+            call_kwargs = mock_send_btn.call_args[1]
+            assert call_kwargs["recipient_phone"] == "6591234567"
+            assert len(call_kwargs["buttons"]) == 3
+            assert call_kwargs["buttons"][0]["id"] == "book_2026-08-20_09:00"
+
+
+@pytest.mark.asyncio
 async def test_tool_book_appointment():
     """Test book_appointment tool confirms booking details."""
     with patch("app.module_c.bookings.book_appointment", new_callable=AsyncMock) as mock_fn:
@@ -386,7 +410,7 @@ def test_agent_initialization_and_singleton():
     assert agent is not None
     assert getattr(agent, "name", "") == "al_astoora_agent"
     assert getattr(agent, "instruction", "") == SYSTEM_PROMPT
-    assert len(getattr(agent, "tools", [])) == 11
+    assert len(getattr(agent, "tools", [])) == 12
 
     set_agent(agent)
     assert get_agent() is agent

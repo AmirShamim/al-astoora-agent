@@ -22,6 +22,7 @@ from app.module_b.tools import (
     update_document_status,
     validate_document,
     check_available_slots,
+    send_booking_buttons,
     send_interactive_booking_slots,
     book_appointment,
     send_whatsapp_text,
@@ -58,6 +59,7 @@ MESSAGING_TOOL_NAMES = {
     "send_whatsapp_text",
     "send_whatsapp_buttons",
     "send_whatsapp_list",
+    "send_booking_buttons",
     "send_interactive_booking_slots",
 }
 
@@ -336,7 +338,7 @@ async def _execute_agent_turn(
                                 dispatched_message_text = fn_args.get("text", "")
                             elif fn_name in ("send_whatsapp_buttons", "send_whatsapp_list"):
                                 dispatched_message_text = fn_args.get("body_text", "")
-                            elif fn_name == "send_interactive_booking_slots":
+                            elif fn_name in ("send_interactive_booking_slots", "send_booking_buttons"):
                                 dispatched_message_text = "Please choose a convenient 30-minute slot for our discovery call from the interactive options above:"
 
                         tool_result = "Tool not found"
