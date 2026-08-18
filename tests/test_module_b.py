@@ -526,3 +526,125 @@ async def test_router_dispatches_to_registered_handler():
     assert called_msg.sender_phone == "6591234567"
     assert called_msg.message_content == "Hello agent!"
     assert called_msg.profile_name == "Test Client"
+
+
+# ==============================================================================
+# 6. Multi-Turn Session Persistence & State Integration Tests
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_process_message_persists_session_on_text():
+    """Verify process_message persists user message and model response to session history."""
+    from app.module_c.sessions import get_session_history, clear_session_cache
+
+    clear_session_cache()
+    phone = "6599998888"
+
+    msg = ParsedMessage(
+        sender_phone=phone,
+        profile_name="Tariq",
+        message_type="text",
+        message_content="Hello, I want to inquire about automation.",
+        media_id=None,
+        media_filename=None,
+        raw_timestamp="1723852800",
+        raw_message_id="wamid.test_persist_1",
+        metadata={},
+    )
+
+    mock_agent = MagicMock()
+    mock_agent.run = MagicMock(return_value="Hi Tariq! We offer WhatsApp Automation from $200-$400.")
+
+    with patch("app.module_b.agent.get_agent", return_value=mock_agent):
+        with patch("app.module_b.agent.mark_message_as_read", new_callable=AsyncMock):
+            with patch("app.module_b.agent.send_text_message", new_callable=AsyncMock):
+                with patch("app.module_c.firestore_client.get_firestore_client") as mock_db_getter:
+                    mock_doc_ref = MagicMock()
+                    mock_doc_ref.set = AsyncMock()
+                    mock_doc_snap = MagicMock()
+                    mock_doc_snap.exists = False
+                    mock_doc_ref.get = AsyncMock(return_value=mock_doc_snap)
+                    mock_db = MagicMock()
+                    mock_db.collection.return_value.document.return_value = mock_doc_ref
+                    mock_db_getter.return_value = mock_db
+
+                    await process_message(msg)
+
+                    # Check that session history recorded both turns in memory cache
+                    history = await get_session_history(phone)
+                    assert len(history) >= 2
+                    assert history[0]["role"] == "user"
+                    assert "automation" in history[0]["text"]
+                    assert history[1]["role"] == "model"
+                    assert "WhatsApp Automation" in history[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_session_on_tool_dispatch():
+    """When a messaging tool like buttons is dispatched, session history is still recorded."""
+    from app.module_c.sessions import get_session_history, clear_session_cache
+    from app.module_b.agent import _execute_agent_turn
+
+    clear_session_cache()
+    phone = "6599997777"
+
+    msg = ParsedMessage(
+        sender_phone=phone,
+        profile_name="Kareem",
+        message_type="text",
+        message_content="Show me service options",
+        media_id=None,
+        media_filename=None,
+        raw_timestamp="1723852800",
+        raw_message_id="wamid.test_persist_tool",
+        metadata={},
+    )
+
+    with patch("app.module_b.agent.get_agent"):
+        with patch("app.module_b.agent.mark_message_as_read", new_callable=AsyncMock):
+            with patch("app.module_b.agent._execute_agent_turn", new_callable=AsyncMock) as mock_exec:
+                # Simulate tool dispatching interactive buttons
+                mock_exec.return_value = (None, True, "Please choose your desired service:")
+
+                with patch("app.module_c.firestore_client.get_firestore_client") as mock_db_getter:
+                    mock_doc_ref = MagicMock()
+                    mock_doc_ref.set = AsyncMock()
+                    mock_doc_snap = MagicMock()
+                    mock_doc_snap.exists = False
+                    mock_doc_ref.get = AsyncMock(return_value=mock_doc_snap)
+                    mock_db = MagicMock()
+                    mock_db.collection.return_value.document.return_value = mock_doc_ref
+                    mock_db_getter.return_value = mock_db
+
+                    await process_message(msg)
+
+                    history = await get_session_history(phone)
+                    assert len(history) == 2
+                    assert history[0]["role"] == "user"
+                    assert "service options" in history[0]["text"]
+                    assert history[1]["role"] == "model"
+                    assert "Please choose your desired service" in history[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_client_state_summary_active_onboarding():
+    """Verify _get_client_state_summary summarizes active onboarding progress."""
+    from app.module_b.agent import _get_client_state_summary
+
+    mock_intake = {
+        "success": True,
+        "service_type": "sg_company_registration",
+        "received": 1,
+        "total_required": 3,
+        "pending": ["proof_of_address", "director_resolution"],
+        "rejected": [],
+        "complete": False,
+    }
+
+    with patch("app.module_c.clients.check_intake_status", new_callable=AsyncMock, return_value=mock_intake):
+        with patch("app.module_c.bookings.get_client_bookings", new_callable=AsyncMock, return_value={"success": True, "bookings": []}):
+            summary = await _get_client_state_summary("6591234567")
+            assert "sg_company_registration" in summary
+            assert "1/3" in summary
+            assert "proof_of_address" in summary
+

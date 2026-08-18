@@ -87,15 +87,86 @@ def set_agent(agent: Optional[Any]) -> None:
     _agent_instance = agent
 
 
-def _build_user_event_prompt(message: ParsedMessage) -> str:
+async def _get_client_state_summary(sender_phone: str) -> str:
     """
-    Formats the incoming WhatsApp message event and metadata into a structured
-    context prompt for the Gemini agent.
+    Fetches the live business state for this sender from Module C (Firestore)
+    including lead capture status, onboarding checklist progress, and bookings.
+    """
+    summary_parts = []
+    try:
+        from app.module_c.clients import check_intake_status
+        from app.module_c.leads import get_lead_by_phone
+        from app.module_c.bookings import get_client_bookings
+
+        # 1. Check if client has active onboarding profile
+        intake_res = await check_intake_status(sender_phone)
+        if intake_res.get("success"):
+            service_type = intake_res.get("service_type", "General")
+            received = intake_res.get("received", 0)
+            total = intake_res.get("total_required", 0)
+            pending = intake_res.get("pending", [])
+            rejected = intake_res.get("rejected", [])
+            is_complete = intake_res.get("complete", False)
+
+            status_str = f"Client Onboarding Active for '{service_type}'. Progress: {received}/{total} documents validated."
+            if is_complete:
+                status_str += " All required documents have been validated!"
+            else:
+                if pending:
+                    status_str += f" Pending next: {', '.join(pending)}."
+                if rejected:
+                    rej_strs = [f"{r.get('doc_type')} ({r.get('rejection_reason')})" for r in rejected]
+                    status_str += f" Rejected to resubmit: {', '.join(rej_strs)}."
+            summary_parts.append(status_str)
+        else:
+            # 2. Check if prospect lead was captured
+            lead_res = await get_lead_by_phone(sender_phone)
+            if lead_res.get("success"):
+                lead_data = lead_res.get("lead", {})
+                lead_name = lead_data.get("name", "Prospect")
+                lead_interest = lead_data.get("interest", "Consulting")
+                summary_parts.append(f"Lead record captured for {lead_name} (Interest: '{lead_interest}').")
+
+        # 3. Check for existing confirmed bookings
+        booking_res = await get_client_bookings(sender_phone)
+        if booking_res.get("success") and booking_res.get("bookings"):
+            confirmed_bookings = [b for b in booking_res.get("bookings", []) if b.get("status") == "confirmed"]
+            if confirmed_bookings:
+                latest_b = confirmed_bookings[-1]
+                summary_parts.append(f"Confirmed Discovery Appointment: {latest_b.get('date')} at {latest_b.get('time')}.")
+
+    except Exception as e:
+        logger.warning("Could not build client state summary for %s: %s", sender_phone, e)
+
+    return "\n".join(summary_parts) if summary_parts else ""
+
+
+def _build_user_event_prompt(
+    message: ParsedMessage,
+    state_summary: str = "",
+    is_continuing_convo: bool = False,
+) -> str:
+    """
+    Formats the incoming WhatsApp message event and metadata into a clean
+    context prompt for the Gemini agent, including live Firestore state.
     """
     metadata_json = json.dumps(message.metadata or {})
     media_info = f"Media ID: {message.media_id}" if message.media_id else "No Media attached"
     if message.media_filename:
         media_info += f" (Filename: {message.media_filename})"
+
+    convo_status = (
+        "Continuing multi-turn conversation. DO NOT re-introduce the agency or restart greetings. Continue seamlessly from previous context."
+        if is_continuing_convo
+        else "New incoming inquiry."
+    )
+
+    state_section = f"\n- Live Business Context (Module C): {state_summary}" if state_summary else ""
+    doc_action = (
+        f"\n- Document Intake Action: User uploaded a file (Media ID: {message.media_id}). Call 'validate_document' to inspect and record verification."
+        if message.media_id
+        else ""
+    )
 
     return f"""[INCOMING WHATSAPP MESSAGE EVENT]
 - Sender Phone: {message.sender_phone}
@@ -104,34 +175,28 @@ def _build_user_event_prompt(message: ParsedMessage) -> str:
 - Message Content / User Text: {message.message_content}
 - Media Details: {media_info}
 - Metadata: {metadata_json}
-
-Instruction:
-Follow the consultative workflow for Al Astoora B2B Infrastructure:
-1. Always maintain a warm, human, professional persona.
-2. If the user shares interest or is greeting, call 'capture_lead' behind the scenes to record their intent. Introduce our B2B agency/SaaS infrastructure and ask how we can help.
-3. DO NOT demand documents immediately unless they have confirmed an onboarding track or uploaded a document.
-4. If they ask about services or pricing, share our transparent pricing ranges and offer to book a discovery demo.
-5. If they want to schedule a call, call 'check_available_slots' or 'book_appointment'.
-6. If they confirm starting an onboarding service, call 'get_or_create_client'.
-7. If this is a document/image upload (Media ID provided), check which document is pending and call 'validate_document'.
-8. Respond concisely in English without markdown syntax (no asterisks or hash headers). If you use a WhatsApp messaging tool (e.g. send_whatsapp_buttons or send_whatsapp_list), you do not need to repeat the same text in your final response.
-"""
+- Conversation Status: {convo_status}{state_section}{doc_action}"""
 
 
-async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -> Tuple[Optional[str], bool]:
+async def _execute_agent_turn(
+    agent: Any,
+    prompt: str,
+    message: ParsedMessage,
+) -> Tuple[Optional[str], bool, Optional[str]]:
     """
     Executes an agent reasoning and tool invocation turn using Google GenAI SDK with multi-turn tool loop.
     Returns:
-        tuple (response_text: Optional[str], message_already_sent_via_tool: bool)
+        tuple (response_text: Optional[str], message_already_sent_via_tool: bool, dispatched_message_text: Optional[str])
     """
     dispatched_via_tool = False
+    dispatched_message_text: Optional[str] = None
 
     # Direct GenAI model invocation with multi-turn tool loop
     try:
         from google import genai
         from google.genai import types
         from app.module_d.validator import get_genai_client
-        from app.module_c.sessions import get_session_history, append_session_message
+        from app.module_c.sessions import get_session_history
 
         client = get_genai_client()
         settings = get_settings()
@@ -160,20 +225,37 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
         # 1. Load multi-turn session history for this sender
         past_history = await get_session_history(message.sender_phone, max_messages=10)
         contents = []
+        last_role = None
+
         for past_msg in past_history:
             role = past_msg.get("role", "user")
             text = past_msg.get("text", "")
-            if text:
-                try:
-                    contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
-                except Exception:
-                    contents.append({"role": role, "parts": [{"text": text}]})
+            if not text:
+                continue
 
-        # 2. Append current user event prompt
-        try:
-            contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
-        except Exception:
-            contents.append({"role": "user", "parts": [{"text": prompt}]})
+            # Ensure valid alternating roles (user -> model -> user -> model)
+            if role == last_role:
+                continue
+
+            try:
+                contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
+                last_role = role
+            except Exception:
+                contents.append({"role": role, "parts": [{"text": text}]})
+                last_role = role
+
+        # If history ended with a user turn, wrap prompt into a single user turn
+        if last_role == "user" and contents:
+            try:
+                contents[-1] = types.Content(role="user", parts=[types.Part(text=prompt)])
+            except Exception:
+                contents[-1] = {"role": "user", "parts": [{"text": prompt}]}
+        else:
+            # 2. Append current user event prompt
+            try:
+                contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+            except Exception:
+                contents.append({"role": "user", "parts": [{"text": prompt}]})
 
         MAX_TURNS = 8
         for turn in range(MAX_TURNS):
@@ -205,16 +287,6 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
             function_response_parts = []
 
             if candidates and hasattr(candidates[0], "content") and hasattr(candidates[0].content, "parts"):
-                if turn == 0 and isinstance(contents[0], str):
-                    try:
-                        contents = [
-                            types.Content(role="user", parts=[types.Part(text=prompt)])
-                        ]
-                    except Exception:
-                        contents = [
-                            {"role": "user", "parts": [{"text": prompt}]}
-                        ]
-
                 contents.append(candidates[0].content)
 
                 for part in candidates[0].content.parts:
@@ -225,9 +297,13 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
                         fn_args = dict(getattr(fn_call, "args", {}) or {})
                         logger.info("Agent tool call [turn %d]: %s(%s)", turn, fn_name, fn_args)
 
-                        # Check if this tool already dispatches a message to WhatsApp
+                        # Check if this tool dispatches a message to WhatsApp
                         if fn_name in MESSAGING_TOOL_NAMES:
                             dispatched_via_tool = True
+                            if fn_name == "send_whatsapp_text":
+                                dispatched_message_text = fn_args.get("text", "")
+                            elif fn_name in ("send_whatsapp_buttons", "send_whatsapp_list"):
+                                dispatched_message_text = fn_args.get("body_text", "")
 
                         tool_result = "Tool not found"
                         if fn_name in tool_map:
@@ -275,20 +351,20 @@ async def _execute_agent_turn(agent: Any, prompt: str, message: ParsedMessage) -
                 str(text_result)[:100] if text_result else "None",
                 dispatched_via_tool,
             )
-            return (text_result, dispatched_via_tool)
+            return (text_result, dispatched_via_tool, dispatched_message_text)
 
         logger.warning("Agent exceeded max %d turns", MAX_TURNS)
-        return (None, dispatched_via_tool)
+        return (None, dispatched_via_tool, dispatched_message_text)
     except Exception as e:
         logger.exception("Direct GenAI fallback FAILED: %s", e)
-        return (None, dispatched_via_tool)
+        return (None, dispatched_via_tool, dispatched_message_text)
 
 
 async def process_message(message: ParsedMessage) -> None:
     """
     Main asynchronous message processing hook registered with Module A router.
-    Orchestrates the entire agent response lifecycle with blue tick read receipts
-    and human typing pacing.
+    Orchestrates the entire agent response lifecycle with blue tick read receipts,
+    multi-turn Firestore state persistence, and human typing pacing.
     """
     sender_phone = message.sender_phone
     profile_name = message.profile_name or "Client"
@@ -309,14 +385,41 @@ async def process_message(message: ParsedMessage) -> None:
 
     try:
         agent = get_agent()
-        prompt = _build_user_event_prompt(message)
 
-        # Execute agent reasoning & tool calling loop
-        response_text, dispatched_via_tool = await _execute_agent_turn(agent, prompt, message)
+        # 2. Check live conversation history & Firestore business state
+        from app.module_c.sessions import get_session_history, append_session_message
+        past_history = await get_session_history(sender_phone, max_messages=10)
+        is_continuing = len(past_history) > 0
+        state_summary = await _get_client_state_summary(sender_phone)
 
-        # If a messaging tool already dispatched a button/text message, don't send a duplicate!
+        # 3. Build enriched context prompt
+        prompt = _build_user_event_prompt(
+            message,
+            state_summary=state_summary,
+            is_continuing_convo=is_continuing,
+        )
+
+        # 4. Execute agent reasoning & tool calling loop
+        response_text, dispatched_via_tool, dispatched_message_text = await _execute_agent_turn(agent, prompt, message)
+
+        # 5. Format incoming user text for persistent session recording
+        user_text = message.message_content
+        if not user_text or not str(user_text).strip():
+            if message.media_filename:
+                user_text = f"[{message.message_type}: {message.media_filename}]"
+            elif message.media_id:
+                user_text = f"[{message.message_type} upload]"
+            else:
+                user_text = f"[{message.message_type}]"
+
+        # Record incoming user turn to persistent session history
+        await append_session_message(sender_phone, "user", user_text)
+
+        # If a messaging tool already dispatched a button/text message:
         if dispatched_via_tool:
-            logger.info("Message was already sent via tool for %s. Skipping extra text dispatch.", sender_phone)
+            model_sent_text = dispatched_message_text or response_text or "[Interactive WhatsApp Message Sent]"
+            await append_session_message(sender_phone, "model", model_sent_text)
+            logger.info("Message was already sent via tool for %s. Recorded in session history.", sender_phone)
             return
 
         # Deliver generated text response if available
@@ -327,10 +430,7 @@ async def process_message(message: ParsedMessage) -> None:
                 clean_text = clean_text.replace(char, "")
             clean_text = clean_text.strip()
 
-            # Record turn into session history
-            from app.module_c.sessions import append_session_message
-            user_text = message.message_content or f"[{message.message_type}]"
-            await append_session_message(sender_phone, "user", user_text)
+            # Record model turn into session history
             await append_session_message(sender_phone, "model", clean_text)
 
             # Human-like typing simulation pacing
@@ -340,12 +440,12 @@ async def process_message(message: ParsedMessage) -> None:
             logger.info("Sending agent response to %s: %s", sender_phone, clean_text[:120])
             await send_text_message(recipient_phone=sender_phone, text=clean_text)
         else:
-            # Fallback acknowledgment (1-2 sentences)
-            logger.warning("Sending fallback greeting to %s (%s)", profile_name, sender_phone)
-            fallback_msg = f"Hi {profile_name}! Welcome to Al Astoora. How can we help automate or streamline your business operations today?"
-            from app.module_c.sessions import append_session_message
-            user_text = message.message_content or f"[{message.message_type}]"
-            await append_session_message(sender_phone, "user", user_text)
+            # Context-aware fallback response (maintains continuity if returning client)
+            if is_continuing:
+                fallback_msg = f"Thank you, {profile_name}. I have noted that. How would you like to proceed?"
+            else:
+                fallback_msg = f"Hi {profile_name}! Welcome to Al Astoora. How can we help automate or streamline your corporate services today?"
+
             await append_session_message(sender_phone, "model", fallback_msg)
 
             # Brief human pause
@@ -365,4 +465,5 @@ async def process_message(message: ParsedMessage) -> None:
 
 
 root_agent = get_agent()
+
 

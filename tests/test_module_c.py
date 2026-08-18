@@ -30,6 +30,12 @@ from app.module_c.bookings import (
     get_client_bookings,
     DEFAULT_SLOTS,
 )
+from app.module_c.sessions import (
+    get_session_history,
+    append_session_message,
+    clear_session,
+    clear_session_cache,
+)
 
 
 # ==============================================================================
@@ -519,3 +525,85 @@ async def test_cancel_appointment():
     assert result["success"] is True
     assert result["status"] == "cancelled"
     mock_doc_ref.update.assert_awaited_once()
+
+
+# ==============================================================================
+# 6. Session & Conversation History Tests (app/module_c/sessions.py)
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_session_append_and_get_memory_cache():
+    """Verify appending session messages stores in memory cache and can be retrieved."""
+    clear_session_cache()
+    phone = "6591112222"
+
+    mock_db = MagicMock()
+    mock_doc_ref = MagicMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_snap = MagicMock()
+    mock_doc_snap.exists = False
+    mock_doc_ref.get = AsyncMock(return_value=mock_doc_snap)
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    set_firestore_client(mock_db)
+
+    await append_session_message(phone, "user", "Hi, what services do you have?")
+    await append_session_message(phone, "model", "We offer WhatsApp automation and booking systems.")
+
+    history = await get_session_history(phone)
+    assert len(history) == 2
+    assert history[0]["role"] == "user"
+    assert "services" in history[0]["text"]
+    assert history[1]["role"] == "model"
+    assert "WhatsApp automation" in history[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_session_firestore_fetch_on_cache_miss():
+    """Verify get_session_history queries Firestore on cache miss."""
+    clear_session_cache()
+    phone = "6593334444"
+
+    mock_db = MagicMock()
+    mock_doc_ref = MagicMock()
+    mock_doc_snap = MagicMock()
+    mock_doc_snap.exists = True
+    mock_doc_snap.to_dict.return_value = {
+        "phone": phone,
+        "messages": [
+            {"role": "user", "text": "Can I book a demo?", "timestamp": "2026-08-18T10:00:00Z"},
+            {"role": "model", "text": "Sure, what date works?", "timestamp": "2026-08-18T10:00:05Z"},
+        ],
+    }
+    mock_doc_ref.get = AsyncMock(return_value=mock_doc_snap)
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    set_firestore_client(mock_db)
+
+    history = await get_session_history(phone)
+    assert len(history) == 2
+    assert history[0]["text"] == "Can I book a demo?"
+    assert history[1]["text"] == "Sure, what date works?"
+
+
+@pytest.mark.asyncio
+async def test_clear_session():
+    """Verify clear_session empties memory cache and deletes Firestore document."""
+    clear_session_cache()
+    phone = "6595556666"
+
+    mock_db = MagicMock()
+    mock_doc_ref = MagicMock()
+    mock_doc_ref.delete = AsyncMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_snap = MagicMock()
+    mock_doc_snap.exists = False
+    mock_doc_ref.get = AsyncMock(return_value=mock_doc_snap)
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    set_firestore_client(mock_db)
+
+    await append_session_message(phone, "user", "Hello")
+    await clear_session(phone)
+
+    mock_doc_ref.delete.assert_awaited_once()
+    history = await get_session_history(phone)
+    assert history == []
+

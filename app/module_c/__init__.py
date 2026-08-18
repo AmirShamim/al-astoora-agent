@@ -34,6 +34,7 @@ from app.module_c.sessions import (
     get_session_history,
     append_session_message,
     clear_session,
+    clear_session_cache,
 )
 
 __all__ = [
@@ -57,4 +58,5 @@ __all__ = [
     "get_session_history",
     "append_session_message",
     "clear_session",
+    "clear_session_cache",
 ]

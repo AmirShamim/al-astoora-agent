@@ -52,6 +52,7 @@ async def get_session_history(phone: str, max_messages: int = MAX_HISTORY_MESSAG
 async def append_session_message(phone: str, role: str, text: str) -> None:
     """
     Appends a message (user or model) to the active session history in both memory and Firestore.
+    Automatically initializes from Firestore if not yet loaded in local memory.
     """
     clean_phone = str(phone).strip()
     if not clean_phone or not text or not str(text).strip():
@@ -63,9 +64,25 @@ async def append_session_message(phone: str, role: str, text: str) -> None:
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Update in-memory cache
+    # Ensure in-memory cache is populated from Firestore if not present
     if clean_phone not in _SESSION_CACHE:
-        _SESSION_CACHE[clean_phone] = []
+        try:
+            db = get_firestore_client()
+            session_ref = db.collection(SESSIONS_COLLECTION).document(clean_phone)
+            session_snap = await session_ref.get()
+            if session_snap.exists:
+                data = session_snap.to_dict() or {}
+                existing_msgs = data.get("messages", [])
+                if isinstance(existing_msgs, list):
+                    _SESSION_CACHE[clean_phone] = list(existing_msgs)
+                else:
+                    _SESSION_CACHE[clean_phone] = []
+            else:
+                _SESSION_CACHE[clean_phone] = []
+        except Exception as e:
+            logger.warning("Could not pre-fetch session from Firestore for %s: %s", clean_phone, e)
+            _SESSION_CACHE[clean_phone] = []
+
     _SESSION_CACHE[clean_phone].append(entry)
 
     # Trim in-memory cache to last 20 messages
@@ -89,7 +106,7 @@ async def append_session_message(phone: str, role: str, text: str) -> None:
 
 
 async def clear_session(phone: str) -> None:
-    """Clears conversation history for a given phone number."""
+    """Clears conversation history for a given phone number from memory and Firestore."""
     clean_phone = str(phone).strip()
     if clean_phone in _SESSION_CACHE:
         _SESSION_CACHE.pop(clean_phone, None)
@@ -99,3 +116,9 @@ async def clear_session(phone: str) -> None:
         await session_ref.delete()
     except Exception as e:
         logger.warning("Could not delete session from Firestore for %s: %s", clean_phone, e)
+
+
+def clear_session_cache() -> None:
+    """Clears local in-memory session cache (primarily for unit testing)."""
+    _SESSION_CACHE.clear()
+
