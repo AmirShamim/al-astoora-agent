@@ -216,32 +216,25 @@ async def validate_document(
         })
 
 
-async def check_available_slots(date: str = "tomorrow") -> str:
+async def check_available_slots(
+    recipient_phone: Optional[str] = None,
+    phone: Optional[str] = None,
+    date: str = "tomorrow",
+) -> str:
     """
-    Checks available appointment consultation slots for a specific date.
-    Only shows slots that are currently unbooked and available.
-    Standard meeting duration is 30 minutes with a 30-minute buffer interval.
+    Checks and sends available appointment consultation slots directly to the user as interactive WhatsApp options.
+    Automatically excludes already booked slots.
+    Call this whenever the user asks for available times, booking slots, or wants to schedule a meeting.
 
     Args:
+        recipient_phone: Client's phone number with country code.
+        phone: Alternative parameter for client's phone number.
         date: Target appointment date (e.g. 'tomorrow', 'today', '2026-08-20', 'Wednesday').
 
     Returns:
-        String summary of open time slots for the requested date.
+        Status string confirming dispatch of interactive slot list.
     """
-    try:
-        from app.module_c.bookings import check_available_slots as _check_slots
-        result = await _check_slots(date=date)
-        if result.get("success"):
-            labels = result.get("available_slot_labels", [])
-            friendly_date = result.get("friendly_date", date)
-            if labels:
-                slots_str = "\n".join([f"- {s}" for s in labels])
-                return f"Available 30-min consultation slots for {friendly_date}:\n{slots_str}"
-            return f"No open slots available on {friendly_date}. All slots are booked. Please suggest another date."
-        return f"Notice: {result.get('error', 'Could not retrieve slots.')}"
-    except Exception as e:
-        logger.exception("Error in check_available_slots tool: %s", e)
-        return "Could not check available slots due to a temporary issue."
+    return await send_interactive_booking_slots(recipient_phone=recipient_phone, phone=phone, date=date)
 
 
 async def send_booking_buttons(

@@ -61,6 +61,7 @@ MESSAGING_TOOL_NAMES = {
     "send_whatsapp_list",
     "send_booking_buttons",
     "send_interactive_booking_slots",
+    "check_available_slots",
 }
 
 
@@ -338,13 +339,27 @@ async def _execute_agent_turn(
                                 dispatched_message_text = fn_args.get("text", "")
                             elif fn_name in ("send_whatsapp_buttons", "send_whatsapp_list"):
                                 dispatched_message_text = fn_args.get("body_text", "")
-                            elif fn_name in ("send_interactive_booking_slots", "send_booking_buttons"):
+                            elif fn_name in ("send_interactive_booking_slots", "send_booking_buttons", "check_available_slots"):
                                 dispatched_message_text = "Please choose a convenient 30-minute slot for our discovery call from the interactive options above:"
 
                         tool_result = "Tool not found"
                         if fn_name in tool_map:
                             try:
                                 target_tool = tool_map[fn_name]
+                                # Auto-fill sender phone and name into tool arguments if omitted by model
+                                try:
+                                    tool_sig = inspect.signature(target_tool)
+                                    if "recipient_phone" in tool_sig.parameters and not fn_args.get("recipient_phone"):
+                                        fn_args["recipient_phone"] = message.sender_phone
+                                    if "phone" in tool_sig.parameters and not fn_args.get("phone"):
+                                        fn_args["phone"] = message.sender_phone
+                                    if "name" in tool_sig.parameters and not fn_args.get("name"):
+                                        fn_args["name"] = message.profile_name or "Valued Client"
+                                    if "client_phone" in tool_sig.parameters and not fn_args.get("client_phone"):
+                                        fn_args["client_phone"] = message.sender_phone
+                                except Exception as sig_err:
+                                    logger.debug("Signature inspect: %s", sig_err)
+
                                 tool_result = target_tool(**fn_args)
                                 if inspect.isawaitable(tool_result):
                                     tool_result = await tool_result

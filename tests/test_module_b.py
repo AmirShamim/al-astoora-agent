@@ -239,19 +239,21 @@ async def test_tool_validate_document_rejected():
 
 @pytest.mark.asyncio
 async def test_tool_check_available_slots():
-    """Test check_available_slots tool returns formatted slots."""
+    """Test check_available_slots tool forwards to send_interactive_booking_slots."""
     with patch("app.module_c.bookings.check_available_slots", new_callable=AsyncMock) as mock_fn:
-        mock_fn.return_value = {
-            "success": True,
-            "date": "2026-08-20",
-            "friendly_date": "Thursday, August 20, 2026",
-            "available_slots": ["10:00", "11:00", "14:00"],
-            "available_slot_labels": ["10:00 - 10:30 AM", "11:00 - 11:30 AM", "02:00 - 02:30 PM"],
-        }
+        with patch("app.module_b.whatsapp_sender.send_list_message", new_callable=AsyncMock) as mock_send:
+            mock_fn.return_value = {
+                "success": True,
+                "date": "2026-08-20",
+                "friendly_date": "Thursday, August 20, 2026",
+                "available_slots": ["10:00", "11:00", "14:00"],
+                "available_slot_labels": ["10:00 - 10:30 AM", "11:00 - 11:30 AM", "02:00 - 02:30 PM"],
+            }
+            mock_send.return_value = {"success": True}
 
-        res = await check_available_slots("2026-08-20")
-        assert "Available 30-min consultation slots for Thursday, August 20, 2026" in res
-        assert "10:00 - 10:30 AM" in res
+            res = await check_available_slots(recipient_phone="6591234567", date="2026-08-20")
+            assert "Sent interactive slot picker" in res
+            mock_send.assert_called_once()
 
 
 @pytest.mark.asyncio
