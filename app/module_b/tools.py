@@ -279,7 +279,7 @@ async def send_interactive_booking_slots(recipient_phone: str, date: str = "tomo
                 "description": "30-min discovery call",
             })
 
-        sections = [{"title": f"Open Slots ({friendly_date[:15]})", "rows": rows}]
+        sections = [{"title": "Available Slots", "rows": rows}]
 
         body_text = (
             f"Please choose a convenient 30-minute slot for our discovery call on {friendly_date} "

@@ -232,10 +232,10 @@ async def _execute_agent_turn(
 
         client = get_genai_client()
         settings = get_settings()
-        configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
+        configured_model = settings.GEMINI_MODEL or "gemini-2.5-flash"
         # Support fallback models in order of priority
         candidate_models = [configured_model]
-        for fallback in ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash"]:
+        for fallback in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.7-flash"]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 

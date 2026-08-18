@@ -211,12 +211,36 @@ async def send_list_message(
     url = _build_messages_url(settings.WHATSAPP_PHONE_NUMBER_ID)
     headers = _build_auth_headers(settings.WHATSAPP_TOKEN)
 
+    # Sanitize and truncate sections to meet strict WhatsApp Graph API limits
+    sanitized_sections = []
+    total_rows = 0
+    for sec in sections:
+        sec_title = str(sec.get("title", "Options"))[:24]
+        sec_rows = []
+        for r in sec.get("rows", []):
+            if total_rows >= 10:
+                break
+            row_dict = {
+                "id": str(r.get("id", ""))[:200],
+                "title": str(r.get("title", ""))[:24],
+            }
+            if r.get("description"):
+                row_dict["description"] = str(r.get("description"))[:72]
+            sec_rows.append(row_dict)
+            total_rows += 1
+
+        if sec_rows:
+            sanitized_sections.append({
+                "title": sec_title,
+                "rows": sec_rows,
+            })
+
     interactive_obj: Dict[str, Any] = {
         "type": "list",
         "body": {"text": body_text[:1024]},
         "action": {
             "button": button_text[:20],
-            "sections": sections,
+            "sections": sanitized_sections,
         },
     }
 
