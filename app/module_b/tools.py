@@ -216,12 +216,14 @@ async def validate_document(
         })
 
 
-async def check_available_slots(date: str) -> str:
+async def check_available_slots(date: str = "tomorrow") -> str:
     """
     Checks available appointment consultation slots for a specific date.
+    Only shows slots that are currently unbooked and available.
+    Standard meeting duration is 30 minutes with a 30-minute buffer interval.
 
     Args:
-        date: Target appointment date in 'YYYY-MM-DD' format.
+        date: Target appointment date (e.g. 'tomorrow', 'today', '2026-08-20', 'Wednesday').
 
     Returns:
         String summary of open time slots for the requested date.
@@ -230,35 +232,110 @@ async def check_available_slots(date: str) -> str:
         from app.module_c.bookings import check_available_slots as _check_slots
         result = await _check_slots(date=date)
         if result.get("success"):
-            slots = result.get("available_slots", [])
-            if slots:
-                return f"Available slots for {date}:\n" + ", ".join(slots)
-            return f"No open slots available on {date}. Please choose another date."
+            labels = result.get("available_slot_labels", [])
+            friendly_date = result.get("friendly_date", date)
+            if labels:
+                slots_str = "\n".join([f"- {s}" for s in labels])
+                return f"Available 30-min consultation slots for {friendly_date}:\n{slots_str}"
+            return f"No open slots available on {friendly_date}. All slots are booked. Please suggest another date."
         return f"Notice: {result.get('error', 'Could not retrieve slots.')}"
     except Exception as e:
         logger.exception("Error in check_available_slots tool: %s", e)
         return "Could not check available slots due to a temporary issue."
 
 
-async def book_appointment(date: str, time: str, name: str, phone: str) -> str:
+async def send_interactive_booking_slots(recipient_phone: str, date: str = "tomorrow") -> str:
     """
-    Books an appointment / consultation slot for a client.
+    Sends an interactive WhatsApp list message displaying available 30-minute discovery call slots
+    directly to the user for one-tap selection. Automatically excludes already booked slots.
+    Call this when the user wants to schedule a call or asks for available meeting times.
 
     Args:
-        date: Appointment date in 'YYYY-MM-DD' format.
-        time: Appointment time slot (e.g. '14:00' or '10:30').
-        name: Client's full name.
+        recipient_phone: Client's phone number with country code.
+        date: Target appointment date (e.g. 'tomorrow', 'today', '2026-08-20', 'Friday').
+
+    Returns:
+        Status string confirming dispatch of interactive slot list.
+    """
+    try:
+        from app.module_c.bookings import check_available_slots as _check_slots
+        from app.module_b.whatsapp_sender import send_list_message
+
+        result = await _check_slots(date=date)
+        date_iso = result.get("date", date)
+        friendly_date = result.get("friendly_date", date)
+        available_slots = result.get("available_slots", [])
+        available_labels = result.get("available_slot_labels", [])
+
+        if not available_slots:
+            return f"Notice: No open slots available on {friendly_date}. Please ask the client for another preferred date."
+
+        # Build list rows (max 10 rows for WhatsApp interactive list)
+        rows = []
+        for slot_key, slot_lbl in zip(available_slots[:10], available_labels[:10]):
+            rows.append({
+                "id": f"book_{date_iso}_{slot_key}",
+                "title": slot_lbl[:24],
+                "description": "30-min discovery call",
+            })
+
+        sections = [{"title": f"Open Slots ({friendly_date[:15]})", "rows": rows}]
+
+        body_text = (
+            f"Please choose a convenient 30-minute slot for our discovery call on {friendly_date} "
+            "(each session includes a 30-min buffer):"
+        )
+
+        res = await send_list_message(
+            recipient_phone=recipient_phone,
+            body_text=body_text,
+            button_text="Select Time Slot",
+            sections=sections,
+            title="Discovery Call Booking",
+            footer_text="Al Astoora B2B Consultations",
+        )
+
+        if res.get("success"):
+            return f"Sent interactive slot picker for {friendly_date} ({len(rows)} slots available) to {recipient_phone}."
+        return f"Notice: Interactive dispatch returned {res.get('error', 'error')}."
+
+    except Exception as e:
+        logger.exception("Error in send_interactive_booking_slots tool: %s", e)
+        return f"Failed to send interactive slot picker: {str(e)}"
+
+
+async def book_appointment(
+    date: str,
+    time: str,
+    name: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> str:
+    """
+    Books an appointment / consultation slot for a client with collision detection.
+    Standard meeting duration is 30 minutes with a 30-minute buffer interval.
+
+    Args:
+        date: Appointment date (e.g. 'tomorrow', '2026-08-20', 'today', 'Wednesday').
+        time: Appointment time slot (e.g. '12 pm', '12:00', '14:00', '10:00 AM').
+        name: Client's full name (optional, defaults from profile).
         phone: Client's phone number with country code.
 
     Returns:
-        String confirmation message or error details.
+        String confirmation message or conflict notification.
     """
     try:
         from app.module_c.bookings import book_appointment as _book
         result = await _book(date=date, time=time, name=name, phone=phone)
         if result.get("success"):
-            return f"Appointment confirmed for {name} on {date} at {time}. Booking ID: {result.get('booking_id')}."
-        return f"Could not book appointment: {result.get('error', 'Slot already booked or invalid')}"
+            confirmation = result.get("confirmation", "Appointment confirmed.")
+            return f"Success: {confirmation} Booking ID: {result.get('booking_id')}."
+        
+        # If slot was taken, provide open alternative slots
+        error_msg = result.get("error", "Slot already booked.")
+        open_labels = result.get("available_slot_labels", [])
+        if open_labels:
+            return f"Notice: {error_msg} Available open slots for that day are: {', '.join(open_labels)}."
+        return f"Could not book appointment: {error_msg}"
     except Exception as e:
         logger.exception("Error in book_appointment tool: %s", e)
         return "Could not book appointment due to a temporary issue."
@@ -372,8 +449,10 @@ ALL_TOOLS = [
     update_document_status,
     validate_document,
     check_available_slots,
+    send_interactive_booking_slots,
     book_appointment,
     send_whatsapp_text,
     send_whatsapp_buttons,
     send_whatsapp_list,
 ]
+

@@ -241,21 +241,56 @@ async def test_tool_validate_document_rejected():
 async def test_tool_check_available_slots():
     """Test check_available_slots tool returns formatted slots."""
     with patch("app.module_c.bookings.check_available_slots", new_callable=AsyncMock) as mock_fn:
-        mock_fn.return_value = {"success": True, "date": "2026-08-20", "available_slots": ["10:00", "11:00", "14:00"]}
+        mock_fn.return_value = {
+            "success": True,
+            "date": "2026-08-20",
+            "friendly_date": "Thursday, August 20, 2026",
+            "available_slots": ["10:00", "11:00", "14:00"],
+            "available_slot_labels": ["10:00 - 10:30 AM", "11:00 - 11:30 AM", "02:00 - 02:30 PM"],
+        }
 
         res = await check_available_slots("2026-08-20")
-        assert "Available slots for 2026-08-20" in res
-        assert "10:00, 11:00, 14:00" in res
+        assert "Available 30-min consultation slots for Thursday, August 20, 2026" in res
+        assert "10:00 - 10:30 AM" in res
+
+
+@pytest.mark.asyncio
+async def test_tool_send_interactive_booking_slots():
+    """Test send_interactive_booking_slots tool builds and sends WhatsApp interactive list message."""
+    from app.module_b.tools import send_interactive_booking_slots
+
+    with patch("app.module_c.bookings.check_available_slots", new_callable=AsyncMock) as mock_slots:
+        with patch("app.module_b.whatsapp_sender.send_list_message", new_callable=AsyncMock) as mock_send_list:
+            mock_slots.return_value = {
+                "success": True,
+                "date": "2026-08-20",
+                "friendly_date": "Thursday, August 20, 2026",
+                "available_slots": ["10:00", "12:00"],
+                "available_slot_labels": ["10:00 - 10:30 AM", "12:00 - 12:30 PM"],
+            }
+            mock_send_list.return_value = {"success": True}
+
+            res = await send_interactive_booking_slots("6591234567", "2026-08-20")
+            assert "Sent interactive slot picker" in res
+            mock_send_list.assert_called_once()
+            call_kwargs = mock_send_list.call_args[1]
+            assert call_kwargs["recipient_phone"] == "6591234567"
+            assert "Select Time Slot" in call_kwargs["button_text"]
+            assert len(call_kwargs["sections"][0]["rows"]) == 2
 
 
 @pytest.mark.asyncio
 async def test_tool_book_appointment():
     """Test book_appointment tool confirms booking details."""
     with patch("app.module_c.bookings.book_appointment", new_callable=AsyncMock) as mock_fn:
-        mock_fn.return_value = {"success": True, "booking_id": "bk_999"}
+        mock_fn.return_value = {
+            "success": True,
+            "booking_id": "bk_999",
+            "confirmation": "Appointment confirmed for Ahmed on Thursday, August 20, 2026 at 02:00 - 02:30 PM.",
+        }
 
         res = await book_appointment(date="2026-08-20", time="14:00", name="Ahmed", phone="6591234567")
-        assert "Appointment confirmed for Ahmed on 2026-08-20 at 14:00" in res
+        assert "Appointment confirmed for Ahmed on Thursday, August 20, 2026 at 02:00 - 02:30 PM." in res
         assert "bk_999" in res
 
 
@@ -351,7 +386,7 @@ def test_agent_initialization_and_singleton():
     assert agent is not None
     assert getattr(agent, "name", "") == "al_astoora_agent"
     assert getattr(agent, "instruction", "") == SYSTEM_PROMPT
-    assert len(getattr(agent, "tools", [])) == 10
+    assert len(getattr(agent, "tools", [])) == 11
 
     set_agent(agent)
     assert get_agent() is agent
@@ -374,6 +409,8 @@ def test_build_user_event_prompt():
     prompt = _build_user_event_prompt(msg)
     assert "Sender Phone: 6591234567" in prompt
     assert "Sender Profile Name: Tariq Mansoor" in prompt
+    assert "Current System Date & Time:" in prompt
+    assert "Tomorrow's Date:" in prompt
     assert "Media ID: media_img_999" in prompt
     assert "passport_scan.jpg" in prompt
     assert "validate_document" in prompt

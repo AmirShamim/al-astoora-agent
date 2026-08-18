@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import get_settings
@@ -21,6 +22,7 @@ from app.module_b.tools import (
     update_document_status,
     validate_document,
     check_available_slots,
+    send_interactive_booking_slots,
     book_appointment,
     send_whatsapp_text,
     send_whatsapp_buttons,
@@ -52,7 +54,12 @@ except ImportError:
 _agent_instance: Optional[Any] = None
 
 # Messaging tools that directly dispatch WhatsApp messages to the user
-MESSAGING_TOOL_NAMES = {"send_whatsapp_text", "send_whatsapp_buttons", "send_whatsapp_list"}
+MESSAGING_TOOL_NAMES = {
+    "send_whatsapp_text",
+    "send_whatsapp_buttons",
+    "send_whatsapp_list",
+    "send_interactive_booking_slots",
+}
 
 
 def create_adk_agent() -> Any:
@@ -147,9 +154,17 @@ def _build_user_event_prompt(
     is_continuing_convo: bool = False,
 ) -> str:
     """
-    Formats the incoming WhatsApp message event and metadata into a clean
-    context prompt for the Gemini agent, including live Firestore state.
+    Formats the incoming WhatsApp message event, real-time date/time, and metadata into a clean
+    context prompt for the Gemini agent, including live Firestore state and interactive click hints.
     """
+    now_utc = datetime.now(timezone.utc)
+    today_iso = now_utc.strftime("%Y-%m-%d")
+    tomorrow_dt = now_utc + timedelta(days=1)
+    tomorrow_iso = tomorrow_dt.strftime("%Y-%m-%d")
+    today_friendly = now_utc.strftime("%A, %B %d, %Y")
+    tomorrow_friendly = tomorrow_dt.strftime("%A, %B %d, %Y")
+    current_time_str = now_utc.strftime("%H:%M UTC")
+
     metadata_json = json.dumps(message.metadata or {})
     media_info = f"Media ID: {message.media_id}" if message.media_id else "No Media attached"
     if message.media_filename:
@@ -168,14 +183,31 @@ def _build_user_event_prompt(
         else ""
     )
 
+    # Detect interactive slot selection clicks (e.g. book_2026-08-19_12:00)
+    booking_action = ""
+    content_str = str(message.message_content or "").strip()
+    if content_str.startswith("book_"):
+        parts = content_str.split("_")
+        if len(parts) >= 3:
+            slot_date = parts[1]
+            slot_time = parts[2]
+            booking_action = (
+                f"\n- Booking Action: User selected appointment slot Date='{slot_date}', Time='{slot_time}'. "
+                f"Call 'book_appointment' immediately with date='{slot_date}', time='{slot_time}', "
+                f"name='{message.profile_name}', phone='{message.sender_phone}' to confirm."
+            )
+
     return f"""[INCOMING WHATSAPP MESSAGE EVENT]
 - Sender Phone: {message.sender_phone}
 - Sender Profile Name: {message.profile_name}
 - Message Type: {message.message_type}
 - Message Content / User Text: {message.message_content}
+- Current System Date & Time: {today_friendly}, {current_time_str} (Today: {today_iso})
+- Tomorrow's Date: {tomorrow_friendly} (Tomorrow: {tomorrow_iso})
 - Media Details: {media_info}
 - Metadata: {metadata_json}
-- Conversation Status: {convo_status}{state_section}{doc_action}"""
+- Conversation Status: {convo_status}{state_section}{doc_action}{booking_action}"""
+
 
 
 async def _execute_agent_turn(
@@ -304,6 +336,8 @@ async def _execute_agent_turn(
                                 dispatched_message_text = fn_args.get("text", "")
                             elif fn_name in ("send_whatsapp_buttons", "send_whatsapp_list"):
                                 dispatched_message_text = fn_args.get("body_text", "")
+                            elif fn_name == "send_interactive_booking_slots":
+                                dispatched_message_text = "Please choose a convenient 30-minute slot for our discovery call from the interactive options above:"
 
                         tool_result = "Tool not found"
                         if fn_name in tool_map:

@@ -52,7 +52,9 @@ CONVERSATIONAL_PHASES = """=====================================================
 ================================================================================
 - Phase 1 (Greeting / Inquiries): Greet warmly in 1-2 sentences on first contact. Silently call `capture_lead`.
 - Phase 2 (Interest/Pricing): Answer directly in 1-2 sentences with price range, then offer a quick discovery call.
-- Phase 3 (Meeting / Demo): Ask for preferred date/time, call `check_available_slots` or `book_appointment`, and confirm in 1 sentence.
+- Phase 3 (Meeting / Demo / Booking):
+  * When user agrees to a call or asks for available times, call `send_interactive_booking_slots` or `check_available_slots` to present selectable slots.
+  * When user specifies a date & time (e.g. "tomorrow 12 pm"), call `book_appointment` directly.
 - Phase 4 (Onboarding / Docs): ONLY when the client confirms onboarding, call `get_or_create_client` and request ONLY the first document.
 - Phase 5 (Document Upload): When an image/doc is sent, call `validate_document` and give a 1-sentence friendly confirmation or clear feedback."""
 
@@ -61,12 +63,14 @@ TOOL_DIRECTIVES = """===========================================================
 4. TOOL EXECUTION RULES
 ================================================================================
 - `capture_lead`: Call automatically when user shares name/inquiry (do not duplicate if already captured).
-- `get_or_create_client`: Call when starting onboarding.
+- `send_interactive_booking_slots`: Call to send selectable WhatsApp slot options when scheduling a meeting.
 - `check_available_slots`: Call when user asks for available appointment times.
-- `book_appointment`: Call when confirming a meeting.
+- `book_appointment`: Call when booking or confirming a meeting with date and time.
+- `get_or_create_client`: Call when starting onboarding.
 - `validate_document`: Call when media is uploaded.
 - `check_intake_status`: Call when user asks about document progress.
-- `send_whatsapp_buttons` / `send_whatsapp_list` / `send_whatsapp_text`: Use when appropriate."""
+- `send_whatsapp_buttons` / `send_whatsapp_list` / `send_whatsapp_text`: Use when appropriate.
+- ONLY call booking tools when the user expresses an intent to schedule/book or checks availability (never on simple greetings)."""
 
 
 def build_system_prompt() -> str:

@@ -29,6 +29,9 @@ from app.module_c.bookings import (
     cancel_appointment,
     get_client_bookings,
     DEFAULT_SLOTS,
+    SLOT_LABELS,
+    normalize_date,
+    normalize_time,
 )
 from app.module_c.sessions import (
     get_session_history,
@@ -407,6 +410,29 @@ async def test_update_document_status_client_not_found():
 # 5. Booking Management Tests (app/module_c/bookings.py)
 # ==============================================================================
 
+def test_normalize_date_and_time():
+    """Verify natural date and time parsing."""
+    date_iso, friendly = normalize_date("2026-08-25")
+    assert date_iso == "2026-08-25"
+    assert "August 25, 2026" in friendly
+
+    date_iso_tom, _ = normalize_date("tomorrow")
+    assert len(date_iso_tom) == 10
+
+    # Times
+    slot_12, label_12 = normalize_time("12 pm")
+    assert slot_12 == "12:00"
+    assert "12:00 - 12:30 PM" in label_12
+
+    slot_2pm, label_2pm = normalize_time("2:00 PM")
+    assert slot_2pm == "14:00"
+    assert "02:00 - 02:30 PM" in label_2pm
+
+    slot_9am, label_9am = normalize_time("9am")
+    assert slot_9am == "09:00"
+    assert "09:00 - 09:30 AM" in label_9am
+
+
 @pytest.mark.asyncio
 async def test_check_available_slots_filters_booked():
     """Available slots are computed by subtracting confirmed bookings from default slots."""
@@ -431,6 +457,8 @@ async def test_check_available_slots_filters_booked():
     assert "10:00" in result["booked_slots"]
     assert "09:00" in result["available_slots"]
     assert len(result["available_slots"]) == len(DEFAULT_SLOTS) - 1
+    assert "09:00 - 09:30 AM" in result["available_slot_labels"]
+
 
 
 @pytest.mark.asyncio
