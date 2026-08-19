@@ -228,9 +228,9 @@ CRITICAL SCHEMA REQUIREMENTS (STRICT ENUMS ONLY - NO EXCEPTIONS):
 - 'eligibility_assessment.recommended_next_step': Specific actionable next step.
 
 Client Message Guidelines:
-Write a friendly, polite 1-2 sentence message to the client on WhatsApp:
-- If valid (is_valid = true): Warmly confirm that the document has been successfully validated and mention the next step or document needed.
-- If invalid (is_valid = false): Concisely explain the exact issue in clear, non-technical language (e.g., "Your passport photo is blurry and the expiry date cannot be read. Please send a clearer, well-lit photo.") and ask them to resend.
+Write a friendly, polite 1-2 sentence message to the client on WhatsApp with prominent emoji highlighting:
+- If valid (is_valid = true): Start with '✅' (e.g., "✅ Thank you! Your Trade License has been verified. Next, please upload your company bank statement.")
+- If invalid (is_valid = false): Start with '⚠️' or '❌' (e.g., "⚠️ The document you sent appears to be a handwritten note, not a trade license. Could you please send the official trade license document for us to proceed?")
 
 Respond strictly in valid JSON matching this exact schema:
 {{
@@ -240,7 +240,7 @@ Respond strictly in valid JSON matching this exact schema:
   }},
   "is_valid": true,
   "issues": [],
-  "client_message": "Friendly 1-2 sentence WhatsApp response.",
+  "client_message": "✅ Thank you! Your document has been successfully verified.",
   "eligibility_assessment": {{
     "eligibility_status": "eligible",
     "service_track": "sg_company_registration",
@@ -286,7 +286,7 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
             "extracted_fields": {},
             "is_valid": False,
             "issues": ["AI validation response could not be parsed"],
-            "client_message": "We received your document, but could not process it automatically. Our team will review it shortly.",
+            "client_message": "⚠️ We received your document, but could not process it automatically. Our team will review it shortly.",
             "eligibility_assessment": {
                 "eligibility_status": "ineligible",
                 "service_track": "general_corporate_services",
@@ -353,15 +353,23 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
         "summary": reason_text,
     }
 
-    # 6. Rigidly normalize client_message
+    # 6. Rigidly normalize client_message with emoji highlighting
     client_msg = str(data.get("client_message") or "").strip()
+    friendly_name = norm_doc_type.replace("_", " ").title()
     if not client_msg:
-        friendly_name = norm_doc_type.replace("_", " ")
         if is_valid:
-            client_msg = f"Thank you! Your {friendly_name} has been successfully verified."
+            client_msg = f"✅ Thank you! Your {friendly_name} has been successfully verified."
         else:
             issues_str = ", ".join(issues) if issues else "the document could not be validated"
-            client_msg = f"We noticed an issue with your {friendly_name}: {issues_str}. Please send a clearer document."
+            client_msg = f"⚠️ We noticed an issue with your {friendly_name}: {issues_str}. Please send a clearer, official document."
+    else:
+        # Guarantee visible emoji prefix
+        if is_valid:
+            if not any(client_msg.startswith(e) for e in ("✅", "🎉", "👍", "📋")):
+                client_msg = f"✅ {client_msg}"
+        else:
+            if not any(client_msg.startswith(e) for e in ("⚠️", "❌", "🚫", "❗")):
+                client_msg = f"⚠️ {client_msg}"
 
     return {
         "document_type": norm_doc_type,

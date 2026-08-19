@@ -300,6 +300,7 @@ def test_parse_gemini_json_response_valid():
     assert parsed["extracted_fields"]["passport_number"] == "N1234567A"
     assert parsed["issues"] == []
     assert "successfully verified" in parsed["client_message"]
+    assert parsed["client_message"].startswith("✅")
 
 
 def test_parse_gemini_json_response_with_markdown_fences():
@@ -322,6 +323,7 @@ def test_parse_gemini_json_response_with_markdown_fences():
     assert len(parsed["issues"]) == 1
     assert "expired" in parsed["issues"][0].lower()
     assert "expired" in parsed["client_message"].lower()
+    assert parsed["client_message"].startswith("⚠️")
 
 
 def test_parse_gemini_json_response_malformed():
@@ -331,6 +333,7 @@ def test_parse_gemini_json_response_malformed():
 
     assert parsed["is_valid"] is False
     assert parsed["document_type"] == "proof_of_address"
+    assert parsed["client_message"].startswith("⚠️")
     assert parsed["eligibility_assessment"]["status"] == "ineligible"
     assert parsed["eligibility_assessment"]["service_track"] == "sg_company_registration"
     assert len(parsed["issues"]) >= 1
