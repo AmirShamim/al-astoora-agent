@@ -217,13 +217,15 @@ Validate the document according to these strict professional criteria:
 4. Signature & Authentication: If the document is a director resolution, contract, or legal agreement, verify if it is signed/executed.
 5. Corporate Eligibility & Business Insights:
    - Extract business insights (Company Name, Registration/UEN/Tax ID, Registered Capital, Directors/Officers, Financial figures).
-   - Evaluate eligibility for professional services.
+   - Evaluate corporate service eligibility with a specific reason.
 
 CRITICAL SCHEMA REQUIREMENTS (STRICT ENUMS ONLY - NO EXCEPTIONS):
 - 'document_type' MUST be strictly one of: ["passport", "proof_of_address", "trade_license", "bank_statement", "tax_assessment", "director_resolution", "company_constitution", "acra_bizfile", "invoice", "resume", "employment_contract", "general_document"]
 - 'is_valid' MUST be boolean: true or false
-- 'eligibility_assessment.status' MUST be strictly one of: ["eligible", "ineligible", "pending_review"]
+- 'eligibility_assessment.eligibility_status' MUST be strictly one of: ["eligible", "ineligible", "pending_review"]
 - 'eligibility_assessment.service_track' MUST be strictly one of: ["sg_company_registration", "accounting_services", "immigration_consulting", "general_corporate_services"]
+- 'eligibility_assessment.eligibility_reason': Specific explanation of corporate qualification or disqualification.
+- 'eligibility_assessment.recommended_next_step': Specific actionable next step.
 
 Client Message Guidelines:
 Write a friendly, polite 1-2 sentence message to the client on WhatsApp:
@@ -240,9 +242,9 @@ Respond strictly in valid JSON matching this exact schema:
   "issues": [],
   "client_message": "Friendly 1-2 sentence WhatsApp response.",
   "eligibility_assessment": {{
-    "status": "eligible",
+    "eligibility_status": "eligible",
     "service_track": "sg_company_registration",
-    "summary": "Brief assessment of corporate eligibility",
+    "eligibility_reason": "Specific reason explaining business qualification or disqualification",
     "recommended_next_step": "Next document or consultation step"
   }}
 }}
@@ -286,10 +288,12 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
             "issues": ["AI validation response could not be parsed"],
             "client_message": "We received your document, but could not process it automatically. Our team will review it shortly.",
             "eligibility_assessment": {
-                "status": "ineligible",
+                "eligibility_status": "ineligible",
                 "service_track": "general_corporate_services",
-                "summary": "Document could not be parsed automatically.",
+                "eligibility_reason": "Document could not be parsed automatically.",
                 "recommended_next_step": "Please submit a clear image or document file.",
+                "status": "ineligible",
+                "summary": "Document could not be parsed automatically.",
             },
         }
 
@@ -315,12 +319,17 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
     if not isinstance(raw_eligibility, dict):
         raw_eligibility = {}
 
-    norm_status = _normalize_eligibility_status(raw_eligibility.get("status"), is_valid=is_valid)
+    raw_el_status = raw_eligibility.get("eligibility_status") or raw_eligibility.get("status")
+    norm_status = _normalize_eligibility_status(raw_el_status, is_valid=is_valid)
     norm_track = _normalize_service_track(raw_eligibility.get("service_track"), doc_type=norm_doc_type)
-    
-    summary_text = str(raw_eligibility.get("summary") or "").strip()
-    if not summary_text:
-        summary_text = (
+
+    reason_text = str(
+        raw_eligibility.get("eligibility_reason")
+        or raw_eligibility.get("summary")
+        or ""
+    ).strip()
+    if not reason_text:
+        reason_text = (
             f"Document successfully verified for {norm_track}."
             if is_valid
             else f"Document validation failed for {norm_track} due to issues detected."
@@ -335,10 +344,13 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
         )
 
     eligibility_assessment = {
-        "status": norm_status,
+        "eligibility_status": norm_status,
         "service_track": norm_track,
-        "summary": summary_text,
+        "eligibility_reason": reason_text,
         "recommended_next_step": next_step_text,
+        # Backward-compatible aliases:
+        "status": norm_status,
+        "summary": reason_text,
     }
 
     # 6. Rigidly normalize client_message

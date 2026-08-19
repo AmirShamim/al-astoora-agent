@@ -55,6 +55,7 @@ async def record_document_submission(
             "phone": phone,
             "doc_type": doc_type,
             "is_valid": is_valid,
+            "document_verification_status": "validated" if is_valid else "rejected",
             "status": "validated" if is_valid else "rejected",
             "extracted_fields": extracted_fields or {},
             "issues": issues or [],

@@ -179,7 +179,12 @@ async def test_tool_validate_document_success():
         "is_valid": True,
         "issues": [],
         "client_message": "Thank you! Your passport has been successfully verified.",
-        "eligibility_assessment": {"status": "eligible", "service_track": "sg_company_registration"},
+        "eligibility_assessment": {
+            "eligibility_status": "eligible",
+            "status": "eligible",
+            "service_track": "sg_company_registration",
+            "eligibility_reason": "Passport verified for company registration.",
+        },
         "file_url": "gs://al-astoora-documents/passport.jpg",
     }
     with patch("app.module_d.validator.validate_document", new_callable=AsyncMock) as mock_val_fn:
@@ -198,6 +203,7 @@ async def test_tool_validate_document_success():
                 parsed = json.loads(res)
                 assert parsed["is_valid"] is True
                 assert "passport" in parsed["document_type"]
+                assert parsed["eligibility_assessment"]["eligibility_status"] == "eligible"
                 assert parsed["eligibility_assessment"]["status"] == "eligible"
                 mock_record_fn.assert_called_once()
                 mock_update_fn.assert_called_once_with(

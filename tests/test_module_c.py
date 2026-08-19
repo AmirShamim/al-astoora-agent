@@ -475,6 +475,9 @@ async def test_record_document_submission():
     assert result["submission_id"] == "sub_doc_999"
     assert result["is_valid"] is True
     mock_doc_ref.set.assert_awaited_once()
+    saved_payload = mock_doc_ref.set.call_args[0][0]
+    assert saved_payload["document_verification_status"] == "validated"
+    assert saved_payload["status"] == "validated"
 
 
 @pytest.mark.asyncio

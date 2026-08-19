@@ -356,8 +356,10 @@ def test_parse_gemini_json_response_normalizes_hallucinated_enums():
     assert parsed["document_type"] == "trade_license"
     assert parsed["is_valid"] is False
     # Must be rigidly mapped to 'ineligible' and 'sg_company_registration'
+    assert parsed["eligibility_assessment"]["eligibility_status"] == "ineligible"
     assert parsed["eligibility_assessment"]["status"] == "ineligible"
     assert parsed["eligibility_assessment"]["service_track"] == "sg_company_registration"
+    assert "expired" in parsed["eligibility_assessment"]["eligibility_reason"].lower()
 
     # Test 'n/a' service track mapping
     raw_json_na = json.dumps({
@@ -372,6 +374,7 @@ def test_parse_gemini_json_response_normalizes_hallucinated_enums():
     })
     parsed_na = _parse_gemini_json_response(raw_json_na, "auto_detect")
     assert parsed_na["document_type"] == "general_document"
+    assert parsed_na["eligibility_assessment"]["eligibility_status"] == "ineligible"
     assert parsed_na["eligibility_assessment"]["status"] == "ineligible"
     assert parsed_na["eligibility_assessment"]["service_track"] == "general_corporate_services"
 
