@@ -396,6 +396,11 @@ async def _execute_agent_turn(
                         function_response_parts.append(fr_part)
 
             if has_function_calls and function_response_parts:
+                # If an interactive UI message was already sent to WhatsApp, finish immediately without duplicate text
+                if dispatched_via_tool:
+                    logger.info("Interactive WhatsApp message dispatched via tool. Ending agent turn cleanly.")
+                    return (None, True, dispatched_message_text)
+
                 try:
                     tool_content = types.Content(role="user", parts=function_response_parts)
                 except Exception:
