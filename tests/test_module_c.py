@@ -22,6 +22,9 @@ from app.module_c.documents import (
     update_document_status,
     get_document,
     list_documents,
+    record_document_submission,
+    get_recent_submissions,
+    get_document_submission,
 )
 from app.module_c.bookings import (
     check_available_slots,
@@ -389,7 +392,7 @@ async def test_update_document_status_to_validated_completes_intake():
 
 @pytest.mark.asyncio
 async def test_update_document_status_client_not_found():
-    """Updating a document for a nonexistent client returns success=False."""
+    """Updating a document with auto_create_client=False for a nonexistent client returns success=False."""
     mock_db = MagicMock()
     mock_clients_col = MagicMock()
     mock_client_ref = MagicMock()
@@ -401,9 +404,126 @@ async def test_update_document_status_client_not_found():
 
     set_firestore_client(mock_db)
 
-    result = await update_document_status("9999999999", "passport", "validated")
+    result = await update_document_status("9999999999", "passport", "validated", auto_create_client=False)
     assert result["success"] is False
     assert "Client not found" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_update_document_status_auto_creates_client():
+    """Updating a document for an uninitialized client auto-creates the client profile."""
+    mock_db = MagicMock()
+    mock_clients_col = MagicMock()
+    mock_client_ref = MagicMock()
+    mock_client_snap = MagicMock()
+    mock_client_snap.exists = False  # Initially not found
+    mock_client_ref.get = AsyncMock(return_value=mock_client_snap)
+    mock_client_ref.set = AsyncMock()
+    mock_client_ref.update = AsyncMock()
+
+    mock_doc_ref = MagicMock()
+    mock_doc_snap = MagicMock()
+    mock_doc_snap.exists = False
+    mock_doc_ref.get = AsyncMock(return_value=mock_doc_snap)
+    mock_doc_ref.set = AsyncMock()
+
+    mock_docs_subcol = MagicMock()
+    mock_docs_subcol.document.return_value = mock_doc_ref
+
+    doc1 = MagicMock()
+    doc1.to_dict.return_value = {"doc_type": "trade_license", "status": "validated"}
+    mock_docs_subcol.stream.return_value = AsyncIter([doc1])
+    mock_client_ref.collection.return_value = mock_docs_subcol
+    mock_clients_col.document.return_value = mock_client_ref
+    mock_db.collection.return_value = mock_clients_col
+
+    set_firestore_client(mock_db)
+
+    result = await update_document_status("6591112222", "trade_license", "validated", auto_create_client=True)
+    assert result["success"] is True
+    assert result["status"] == "validated"
+    mock_client_ref.set.assert_awaited_once()  # Auto-created profile
+    mock_doc_ref.set.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_record_document_submission():
+    """Records a document upload into the top-level document_submissions collection."""
+    mock_db = MagicMock()
+    mock_submissions_col = MagicMock()
+    mock_doc_ref = MagicMock()
+    mock_doc_ref.id = "sub_doc_999"
+    mock_doc_ref.set = AsyncMock()
+
+    mock_submissions_col.document.return_value = mock_doc_ref
+    mock_db.collection.return_value = mock_submissions_col
+    set_firestore_client(mock_db)
+
+    result = await record_document_submission(
+        phone="6591234567",
+        doc_type="trade_license",
+        is_valid=True,
+        extracted_fields={"company_name": "Apex Holdings Pte Ltd"},
+        issues=[],
+        file_url="gs://bucket/trade_license.pdf",
+        client_message="Trade license validated.",
+        eligibility_assessment={"status": "eligible", "service_track": "corporate_secretarial"},
+        media_id="media_tl_123",
+    )
+
+    assert result["success"] is True
+    assert result["submission_id"] == "sub_doc_999"
+    assert result["is_valid"] is True
+    mock_doc_ref.set.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_recent_submissions():
+    """Retrieves recent document submissions filtered by phone number."""
+    mock_db = MagicMock()
+    mock_col = MagicMock()
+    mock_query = MagicMock()
+
+    doc1 = MagicMock()
+    doc1.id = "sub_1"
+    doc1.to_dict.return_value = {"phone": "6591234567", "doc_type": "passport", "status": "validated"}
+
+    mock_query.stream.return_value = AsyncIter([doc1])
+    mock_col.where.return_value.limit.return_value = mock_query
+    mock_db.collection.return_value = mock_col
+    set_firestore_client(mock_db)
+
+    result = await get_recent_submissions(phone="6591234567", limit=5)
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["submissions"][0]["doc_type"] == "passport"
+    assert result["submissions"][0]["id"] == "sub_1"
+
+
+@pytest.mark.asyncio
+async def test_get_document_submission():
+    """Fetches a specific document submission by ID."""
+    mock_db = MagicMock()
+    mock_col = MagicMock()
+    mock_doc_ref = MagicMock()
+    mock_snap = MagicMock()
+    mock_snap.exists = True
+    mock_snap.id = "sub_123"
+    mock_snap.to_dict.return_value = {
+        "phone": "6591234567",
+        "doc_type": "bank_statement",
+        "is_valid": True,
+    }
+    mock_doc_ref.get = AsyncMock(return_value=mock_snap)
+    mock_col.document.return_value = mock_doc_ref
+    mock_db.collection.return_value = mock_col
+    set_firestore_client(mock_db)
+
+    result = await get_document_submission("sub_123")
+    assert result["success"] is True
+    assert result["submission"]["doc_type"] == "bank_statement"
+    assert result["submission"]["id"] == "sub_123"
+
 
 
 # ==============================================================================

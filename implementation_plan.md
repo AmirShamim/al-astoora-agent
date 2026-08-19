@@ -264,6 +264,23 @@ intake_templates/{service_type}
 └── description: string
 ```
 
+**Collection: `document_submissions`** (Top-level SaaS audit log & dashboard queries)
+```
+document_submissions/{auto-id}
+├── phone: string
+├── doc_type: string          # "passport" | "trade_license" | "bank_statement"
+├── is_valid: bool
+├── status: string            # "validated" | "rejected"
+├── extracted_fields: map     # {"company_name": "...", "expiry_date": "..."}
+├── issues: array             # ["blurry photo", ...]
+├── file_url: string | null   # Cloud Storage URL
+├── client_message: string
+├── eligibility_assessment: map # {"status": "eligible", "service_track": "..."}
+├── media_id: string
+├── submitted_at: timestamp   # Firestore SERVER_TIMESTAMP
+└── metadata: map
+```
+
 **Collection: `bookings`** (production feature)
 ```
 bookings/{auto-id}
@@ -304,8 +321,16 @@ async def check_intake_status(phone: str) -> dict:
 
 **File: `app/module_c/documents.py`**
 ```python
-async def update_document_status(phone: str, doc_type: str, status: str, file_url: str = None, rejection_reason: str = None) -> dict:
+async def record_document_submission(phone: str, doc_type: str, is_valid: bool, ...) -> dict:
+    # Write submission entry into top-level document_submissions collection
+    # Return {"success": True, "submission_id": "..."}
+
+async def get_recent_submissions(phone: str = None, limit: int = 20) -> dict:
+    # Query document_submissions collection for SaaS dashboard / audit logs
+
+async def update_document_status(phone: str, doc_type: str, status: str, file_url: str = None, rejection_reason: str = None, auto_create_client: bool = True) -> dict:
     # Write to clients/{phone}/documents/{doc_type}
+    # Auto-initialize client profile if missing
     # Update clients/{phone} counters (documents_received)
     # If ALL docs validated → set onboarding_status = "complete"
     # Return {success: True, remaining_docs: []}
@@ -317,6 +342,7 @@ async def check_available_slots(date: str) -> dict:
     # Read bookings where date == date
     # Compute available from predefined slots (e.g. 09:00-17:00, 30min intervals)
     # Return {date, available_slots: ["09:00", "09:30", ...]}
+
 
 async def book_appointment(date: str, time: str, name: str, phone: str) -> dict:
     # Re-read to guard race condition → write if slot open

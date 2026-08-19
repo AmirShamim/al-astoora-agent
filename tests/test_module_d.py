@@ -546,10 +546,101 @@ async def test_validate_document_invalid_document_flagged():
                     client_phone="6591234567",
                 )
 
+@pytest.mark.asyncio
+async def test_validate_document_auto_detect_doc_type():
+    """Test validate_document accurately auto-detects document type when expected_doc_type is auto_detect."""
+    fake_bytes = b"binary photo of trade license"
+
+    mock_download = {
+        "success": True,
+        "file_bytes": fake_bytes,
+        "mime_type": "application/pdf",
+        "file_size": len(fake_bytes),
+        "media_id": "media_tl_auto",
+    }
+
+    mock_storage = {
+        "success": True,
+        "file_url": "gs://al-astoora-documents/clients/6591234567/documents/trade_license.pdf",
+    }
+
+    mock_analysis = {
+        "document_type": "trade_license",
+        "extracted_fields": {
+            "company_name": "Al Astoora Global Pte Ltd",
+            "registration_number": "202612345Z",
+            "expiry_date": "2028-12-31",
+        },
+        "is_valid": True,
+        "issues": [],
+        "client_message": "Your trade license has been successfully validated.",
+        "eligibility_assessment": {
+            "status": "eligible",
+            "service_track": "corporate_secretarial",
+            "summary": "Valid trade license ready for corporate secretarial compliance.",
+        },
+    }
+
+    with patch("app.module_d.validator.download_media", new=AsyncMock(return_value=mock_download)):
+        with patch("app.module_d.validator.upload_to_storage", new=AsyncMock(return_value=mock_storage)):
+            with patch("app.module_d.validator.analyze_document_with_gemini", new=AsyncMock(return_value=mock_analysis)):
+                result = await validate_document(
+                    media_id="media_tl_auto",
+                    expected_doc_type="auto_detect",
+                    client_phone="6591234567",
+                )
+
                 assert result["success"] is True
-                assert result["is_valid"] is False
-                assert len(result["issues"]) == 2
-                assert "blurry" in result["client_message"].lower()
+                assert result["is_valid"] is True
+                assert result["document_type"] == "trade_license"
+                assert result["extracted_fields"]["company_name"] == "Al Astoora Global Pte Ltd"
+                assert result["eligibility_assessment"]["status"] == "eligible"
+
+
+@pytest.mark.asyncio
+async def test_validate_document_extracts_eligibility_assessment():
+    """Test that corporate eligibility assessment is extracted and returned in the pipeline."""
+    fake_bytes = b"binary photo of bank statement"
+
+    mock_download = {
+        "success": True,
+        "file_bytes": fake_bytes,
+        "mime_type": "application/pdf",
+        "file_size": len(fake_bytes),
+        "media_id": "media_bs_pdf",
+    }
+
+    mock_storage = {
+        "success": True,
+        "file_url": "gs://al-astoora-documents/clients/6591234567/documents/bank_statement.pdf",
+    }
+
+    mock_analysis = {
+        "document_type": "bank_statement",
+        "extracted_fields": {"bank_name": "DBS Bank", "account_holder": "Apex LLC"},
+        "is_valid": True,
+        "issues": [],
+        "client_message": "Bank statement verified.",
+        "eligibility_assessment": {
+            "status": "eligible",
+            "service_track": "accounting_services",
+            "summary": "Eligible for automated monthly accounting sync.",
+            "recommended_next_step": "Submit trade license or tax assessment.",
+        },
+    }
+
+    with patch("app.module_d.validator.download_media", new=AsyncMock(return_value=mock_download)):
+        with patch("app.module_d.validator.upload_to_storage", new=AsyncMock(return_value=mock_storage)):
+            with patch("app.module_d.validator.analyze_document_with_gemini", new=AsyncMock(return_value=mock_analysis)):
+                result = await validate_document(
+                    media_id="media_bs_pdf",
+                    expected_doc_type="bank_statement",
+                    client_phone="6591234567",
+                )
+
+                assert result["success"] is True
+                assert result["eligibility_assessment"]["status"] == "eligible"
+                assert "accounting_services" in result["eligibility_assessment"]["service_track"]
 
 
 def test_module_d_strict_boundaries():

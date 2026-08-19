@@ -100,13 +100,14 @@ def set_agent(agent: Optional[Any]) -> None:
 async def _get_client_state_summary(sender_phone: str) -> str:
     """
     Fetches the live business state for this sender from Module C (Firestore)
-    including lead capture status, onboarding checklist progress, and bookings.
+    including lead capture status, onboarding checklist progress, recent document submissions, and bookings.
     """
     summary_parts = []
     try:
         from app.module_c.clients import check_intake_status
         from app.module_c.leads import get_lead_by_phone
         from app.module_c.bookings import get_client_bookings
+        from app.module_c.documents import get_recent_submissions
 
         # 1. Check if client has active onboarding profile
         intake_res = await check_intake_status(sender_phone)
@@ -137,7 +138,13 @@ async def _get_client_state_summary(sender_phone: str) -> str:
                 lead_interest = lead_data.get("interest", "Consulting")
                 summary_parts.append(f"Lead record captured for {lead_name} (Interest: '{lead_interest}').")
 
-        # 3. Check for existing confirmed bookings
+        # 3. Check recent document submissions
+        recent_sub_res = await get_recent_submissions(phone=sender_phone, limit=3)
+        if recent_sub_res.get("success") and recent_sub_res.get("submissions"):
+            sub_strs = [f"{s.get('doc_type')} ({s.get('status')})" for s in recent_sub_res.get("submissions", [])]
+            summary_parts.append(f"Recent Uploads: {', '.join(sub_strs)}.")
+
+        # 4. Check for existing confirmed bookings
         booking_res = await get_client_bookings(sender_phone)
         if booking_res.get("success") and booking_res.get("bookings"):
             confirmed_bookings = [b for b in booking_res.get("bookings", []) if b.get("status") == "confirmed"]
@@ -181,7 +188,9 @@ def _build_user_event_prompt(
 
     state_section = f"\n- Live Business Context (Module C): {state_summary}" if state_summary else ""
     doc_action = (
-        f"\n- Document Intake Action: User uploaded a file (Media ID: {message.media_id}). Call 'validate_document' to inspect and record verification."
+        f"\n- Document Intake Action: User uploaded a file (Media ID: {message.media_id}). "
+        f"Call 'validate_document' with media_id='{message.media_id}', expected_doc_type='auto_detect', "
+        f"client_phone='{message.sender_phone}' to inspect, validate, assess eligibility, and record to database."
         if message.media_id
         else ""
     )

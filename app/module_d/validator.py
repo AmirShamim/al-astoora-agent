@@ -66,38 +66,52 @@ def close_genai_client() -> None:
 
 
 def _build_validation_prompt(expected_doc_type: str, current_date_str: str) -> str:
-    """Constructs the prompt for Gemini 3.7 Flash multimodal document validation."""
-    return f"""You are a strict, expert document validation specialist for Al Astoora, a professional services agency assisting corporate clients with company incorporation, accounting, and immigration in Singapore and GCC (UAE).
+    """Constructs the prompt for Gemini 3.7 Flash multimodal document validation and eligibility assessment."""
+    is_auto = expected_doc_type.lower() in ("auto_detect", "auto", "general_document", "general", "")
+    target_clause = (
+        "Identify the exact document type from visual analysis (e.g. passport, trade_license, bank_statement, "
+        "tax_assessment, director_resolution, company_constitution, acra_bizfile, invoice, resume, employment_contract)."
+        if is_auto
+        else f"Examine the attached file which is expected to be a '{expected_doc_type}'."
+    )
+
+    return f"""You are a strict, expert document validation specialist & corporate workflow consultant for Al Astoora (alastoora.tech).
+Al Astoora is a digital infrastructure & SaaS agency assisting corporate secretarial, accounting, tax, and immigration clients in Singapore and GCC (UAE).
 
 Today's date is: {current_date_str}
 
 Task:
-Examine the attached image or document file which is expected to be a '{expected_doc_type}'.
+{target_clause}
 
-Validate the document according to these strict rules:
-1. Document Type Match: Verify that the document is indeed a '{expected_doc_type}' (e.g. passport, proof of address, director resolution, trade license). If it is a completely different document type, a selfie, or an irrelevant photo, flag it as invalid.
-2. Readability & Quality: Verify that text, numbers, photo, and details are crisp and legible. Flag if there are severe blurs, glare, reflections, dark shadows, or if fingers/objects obstruct any vital information or dates.
-3. Expiry & Validity: Extract the expiry date or validity period. Check if the document has expired relative to today's date ({current_date_str}). Flag expired documents as invalid.
-4. Signature & Execution: If the document type is a resolution, contract, or legal agreement (e.g. director resolution), verify that it is signed.
-5. Completeness: Ensure all crucial corners and key identifying fields are visible.
-
-Field Extraction:
-Extract core fields into 'extracted_fields' (e.g., full_name, document_number, nationality, date_of_birth, issue_date, expiry_date, address, company_name, etc. depending on document type).
+Validate the document according to these strict professional criteria:
+1. Document Identification: Accurately identify and classify the document. If it is an irrelevant photo (selfie, landscape, meme), flag as invalid.
+2. Readability & Quality: Text, registration numbers, dates, and official seals must be crisp and legible. Flag if there are severe blurs, glare, reflections, or if fingers/objects cover vital details or dates.
+3. Expiry & Validity: Extract expiry or validity dates. Check if the document has expired relative to today ({current_date_str}). Flag expired documents as invalid.
+4. Signature & Authentication: If the document is a director resolution, contract, or legal agreement, verify if it is signed/executed.
+5. Corporate Eligibility & Business Insights:
+   - Extract business insights (Company Name, Registration/UEN/Tax ID, Registered Capital, Directors/Officers, Financial figures).
+   - Evaluate eligibility for professional services (e.g. Singapore company registration, corporate secretarial compliance, automated bookkeeping pipeline, or employment visa).
 
 Client Message Guidelines:
 Write a friendly, polite 1-2 sentence message to the client on WhatsApp:
-- If valid (is_valid = true): Warmly confirm that the document has been successfully validated.
+- If valid (is_valid = true): Warmly confirm that the document has been successfully validated and mention the next step or document needed.
 - If invalid (is_valid = false): Concisely explain the exact issue in clear, non-technical language (e.g., "Your passport photo is blurry and the expiry date cannot be read. Please send a clearer, well-lit photo.") and ask them to resend.
 
 Respond strictly in valid JSON matching this exact schema:
 {{
-  "document_type": "{expected_doc_type}",
+  "document_type": "{expected_doc_type if not is_auto else 'detected_document_type'}",
   "extracted_fields": {{
     "key": "value"
   }},
   "is_valid": true,
   "issues": [],
-  "client_message": "Friendly 1-2 sentence WhatsApp response."
+  "client_message": "Friendly 1-2 sentence WhatsApp response.",
+  "eligibility_assessment": {{
+    "status": "eligible",
+    "service_track": "sg_company_registration",
+    "summary": "Brief assessment of corporate eligibility",
+    "recommended_next_step": "Next document or consultation step"
+  }}
 }}
 """
 
@@ -128,18 +142,21 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
         else:
             data = None
 
+    fallback_doc_type = "general_document" if expected_doc_type.lower() in ("auto_detect", "auto", "") else expected_doc_type
+
     if not isinstance(data, dict):
         logger.error("Gemini response did not produce a valid dictionary: %s", raw_text)
         return {
-            "document_type": expected_doc_type,
+            "document_type": fallback_doc_type,
             "extracted_fields": {},
             "is_valid": False,
             "issues": ["AI validation response could not be parsed"],
             "client_message": "We received your document, but could not process it automatically. Our team will review it shortly.",
+            "eligibility_assessment": {},
         }
 
     # Ensure required keys exist with proper types
-    doc_type = str(data.get("document_type") or expected_doc_type)
+    doc_type = str(data.get("document_type") or fallback_doc_type)
     extracted_fields = data.get("extracted_fields")
     if not isinstance(extracted_fields, dict):
         extracted_fields = {}
@@ -149,13 +166,17 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
     if not isinstance(issues, list):
         issues = [str(issues)] if issues else []
 
+    eligibility = data.get("eligibility_assessment")
+    if not isinstance(eligibility, dict):
+        eligibility = {}
+
     client_msg = str(data.get("client_message") or "")
     if not client_msg:
         if is_valid:
-            client_msg = f"Thank you! Your {doc_type} has been successfully verified."
+            client_msg = f"Thank you! Your {doc_type.replace('_', ' ')} has been successfully verified."
         else:
             issues_str = ", ".join(issues) if issues else "the document could not be validated"
-            client_msg = f"We noticed an issue with your {doc_type}: {issues_str}. Please send a clearer document."
+            client_msg = f"We noticed an issue with your {doc_type.replace('_', ' ')}: {issues_str}. Please send a clearer document."
 
     return {
         "document_type": doc_type,
@@ -163,13 +184,14 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
         "is_valid": is_valid,
         "issues": issues,
         "client_message": client_msg,
+        "eligibility_assessment": eligibility,
     }
 
 
 async def analyze_document_with_gemini(
     file_bytes: bytes,
     mime_type: str,
-    expected_doc_type: str,
+    expected_doc_type: str = "auto_detect",
 ) -> Dict[str, Any]:
     """
     Sends document image or PDF to Gemini 3.7 Flash multimodal vision for analysis.
@@ -177,18 +199,21 @@ async def analyze_document_with_gemini(
     Args:
         file_bytes: Raw binary bytes of the document.
         mime_type: MIME type (e.g. 'image/jpeg', 'application/pdf').
-        expected_doc_type: Expected document type (e.g. 'passport', 'proof_of_address').
+        expected_doc_type: Expected document type or 'auto_detect'.
 
     Returns:
-        Dict containing document_type, extracted_fields, is_valid, issues, and client_message.
+        Dict containing document_type, extracted_fields, is_valid, issues, client_message, eligibility_assessment.
     """
+    fallback_doc_type = "general_document" if expected_doc_type.lower() in ("auto_detect", "auto", "") else expected_doc_type
+
     if not file_bytes:
         return {
-            "document_type": expected_doc_type,
+            "document_type": fallback_doc_type,
             "extracted_fields": {},
             "is_valid": False,
             "issues": ["No document bytes provided for validation"],
             "client_message": "No document file was received. Please try sending your document again.",
+            "eligibility_assessment": {},
         }
 
     settings = get_settings()
@@ -249,32 +274,32 @@ async def analyze_document_with_gemini(
     except Exception as e:
         logger.exception("Gemini document analysis failed for '%s': %s", expected_doc_type, e)
         return {
-            "document_type": expected_doc_type,
+            "document_type": fallback_doc_type,
             "extracted_fields": {},
             "is_valid": False,
             "issues": [f"Document analysis error: {str(e)}"],
             "client_message": "We received your document, but encountered an error analyzing it. Our team will review it manually.",
+            "eligibility_assessment": {},
         }
 
 
 async def validate_document(
     media_id: str,
-    expected_doc_type: str,
-    client_phone: str,
+    expected_doc_type: str = "auto_detect",
+    client_phone: str = "",
     original_filename: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Main entry point for Module D: Document Validation Pipeline.
 
-    Executes:
+    Executes non-blocking parallelized workflow:
     1. Download media bytes from WhatsApp Graph API
-    2. Upload file to Google Cloud Storage (best-effort record-keeping)
-    3. Analyze document with Gemini 3.7 Flash multimodal vision
-    4. Return structured validation outcome
+    2. Concurrently execute Cloud Storage upload and Gemini 3.7 Flash multimodal vision analysis via asyncio.gather
+    3. Return structured validation & eligibility outcome
 
     Args:
         media_id: WhatsApp media ID from the incoming message.
-        expected_doc_type: Expected document type (e.g. 'passport', 'proof_of_address').
+        expected_doc_type: Expected document type or 'auto_detect'.
         client_phone: Client phone number for storage path isolation.
         original_filename: Optional original filename if provided in document metadata.
 
@@ -286,12 +311,15 @@ async def validate_document(
             - is_valid (bool): Whether the document passed all validation checks
             - issues (list[str]): List of identified issues or rejections reasons
             - client_message (str): Ready-to-send WhatsApp explanation message
+            - eligibility_assessment (dict): Corporate eligibility and workflow recommendation
             - file_url (str | None): GCS URL if uploaded
             - media_id (str): WhatsApp media ID
             - mime_type (str): Detected media MIME type
     """
+    fallback_doc_type = "general_document" if expected_doc_type.lower() in ("auto_detect", "auto", "") else expected_doc_type
+
     logger.info(
-        "Starting document validation pipeline: media_id=%s, doc_type=%s, phone=%s",
+        "Starting parallel document validation pipeline: media_id=%s, doc_type=%s, phone=%s",
         media_id,
         expected_doc_type,
         client_phone,
@@ -304,11 +332,12 @@ async def validate_document(
         logger.error("Validation aborted: media download failed: %s", error_msg)
         return {
             "success": False,
-            "document_type": expected_doc_type,
+            "document_type": fallback_doc_type,
             "extracted_fields": {},
             "is_valid": False,
             "issues": [error_msg],
             "client_message": "Could not download your document from WhatsApp. Please try sending it again.",
+            "eligibility_assessment": {},
             "file_url": None,
             "media_id": media_id,
             "mime_type": "unknown",
@@ -317,38 +346,46 @@ async def validate_document(
     file_bytes: bytes = download_res["file_bytes"]
     mime_type: str = download_res.get("mime_type", "image/jpeg")
 
-    # Step 2: Upload to Cloud Storage (best effort for record-keeping)
-    storage_res = await upload_to_storage(
-        file_bytes=file_bytes,
-        client_phone=client_phone,
-        doc_type=expected_doc_type,
-        filename=original_filename,
-        mime_type=mime_type,
+    # Step 2 & 3: Run Cloud Storage upload and Gemini Vision analysis concurrently
+    storage_task = asyncio.create_task(
+        upload_to_storage(
+            file_bytes=file_bytes,
+            client_phone=client_phone or "unknown_client",
+            doc_type=expected_doc_type if expected_doc_type not in ("auto_detect", "auto", "") else "documents",
+            filename=original_filename,
+            mime_type=mime_type,
+        )
+    )
+    analysis_task = asyncio.create_task(
+        analyze_document_with_gemini(
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            expected_doc_type=expected_doc_type,
+        )
     )
 
-    file_url = storage_res.get("file_url") if storage_res.get("success") else None
-    if not storage_res.get("success"):
+    storage_res, analysis_res = await asyncio.gather(storage_task, analysis_task, return_exceptions=False)
+
+    file_url = storage_res.get("file_url") if isinstance(storage_res, dict) and storage_res.get("success") else None
+    if isinstance(storage_res, dict) and not storage_res.get("success"):
         logger.warning(
             "Storage upload failed for media %s, but proceeding with validation: %s",
             media_id,
             storage_res.get("error"),
         )
 
-    # Step 3: Analyze with Gemini 3.7 Flash Multimodal Vision
-    analysis_res = await analyze_document_with_gemini(
-        file_bytes=file_bytes,
-        mime_type=mime_type,
-        expected_doc_type=expected_doc_type,
-    )
+    detected_doc_type = analysis_res.get("document_type") or fallback_doc_type
 
     return {
         "success": True,
-        "document_type": analysis_res.get("document_type", expected_doc_type),
+        "document_type": detected_doc_type,
         "extracted_fields": analysis_res.get("extracted_fields", {}),
         "is_valid": bool(analysis_res.get("is_valid", False)),
         "issues": analysis_res.get("issues", []),
         "client_message": analysis_res.get("client_message", ""),
+        "eligibility_assessment": analysis_res.get("eligibility_assessment", {}),
         "file_url": file_url,
         "media_id": media_id,
         "mime_type": mime_type,
     }
+

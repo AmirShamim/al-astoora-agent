@@ -152,58 +152,81 @@ async def update_document_status(
 
 async def validate_document(
     media_id: str,
-    expected_doc_type: str,
-    client_phone: str,
+    expected_doc_type: str = "auto_detect",
+    client_phone: str = "",
     original_filename: Optional[str] = None,
 ) -> str:
     """
     Downloads, stores, and validates a client's document image or PDF using Gemini 3.7 Flash multimodal vision.
-    Automatically updates the document status in the client's records upon completion.
+    Extracts structured business information, validates authenticity/readability, assesses corporate eligibility,
+    and automatically records the submission to both the client's onboarding profile and the top-level database.
 
     Args:
         media_id: WhatsApp media ID for the uploaded file.
-        expected_doc_type: Expected document type (e.g. 'passport', 'proof_of_address', 'director_resolution', 'trade_license', 'bank_statement', 'tax_assessment', 'resume', 'employment_contract').
+        expected_doc_type: Expected document type (e.g. 'auto_detect', 'passport', 'proof_of_address', 'director_resolution', 'trade_license', 'bank_statement', 'tax_assessment', 'resume', 'employment_contract').
         client_phone: The client's phone number with country code.
         original_filename: Optional original filename from WhatsApp metadata.
 
     Returns:
-        String summary of validation results, extracted fields, issues, and recommended client message.
+        JSON string summary of validation results, extracted fields, issues, eligibility assessment, and client response.
     """
     try:
         from app.module_d.validator import validate_document as _validate
-        from app.module_c.documents import update_document_status as _update_doc
+        from app.module_c.documents import (
+            update_document_status as _update_doc,
+            record_document_submission as _record_submission,
+        )
 
+        effective_phone = client_phone or "unknown"
         val_result = await _validate(
             media_id=media_id,
-            expected_doc_type=expected_doc_type,
-            client_phone=client_phone,
+            expected_doc_type=expected_doc_type or "auto_detect",
+            client_phone=effective_phone,
             original_filename=original_filename,
         )
 
         is_valid = val_result.get("is_valid", False)
+        detected_doc_type = val_result.get("document_type") or expected_doc_type or "general_document"
         issues = val_result.get("issues", [])
         client_message = val_result.get("client_message", "")
         file_url = val_result.get("file_url")
         extracted = val_result.get("extracted_fields", {})
+        eligibility = val_result.get("eligibility_assessment", {})
 
-        # Automatically update Firestore state
+        # 1. Record to top-level document_submissions database collection
+        await _record_submission(
+            phone=effective_phone,
+            doc_type=detected_doc_type,
+            is_valid=is_valid,
+            extracted_fields=extracted,
+            issues=issues,
+            file_url=file_url,
+            client_message=client_message,
+            eligibility_assessment=eligibility,
+            media_id=media_id,
+            metadata={"original_filename": original_filename},
+        )
+
+        # 2. Update client onboarding checklist in Firestore
         doc_status = "validated" if is_valid else "rejected"
         rejection_reason = ", ".join(issues) if (not is_valid and issues) else None
 
-        await _update_doc(
-            phone=client_phone,
-            doc_type=expected_doc_type,
-            status=doc_status,
-            file_url=file_url,
-            rejection_reason=rejection_reason,
-        )
+        if effective_phone and effective_phone != "unknown":
+            await _update_doc(
+                phone=effective_phone,
+                doc_type=detected_doc_type,
+                status=doc_status,
+                file_url=file_url,
+                rejection_reason=rejection_reason,
+            )
 
         summary = {
             "is_valid": is_valid,
-            "document_type": val_result.get("document_type", expected_doc_type),
+            "document_type": detected_doc_type,
             "client_message": client_message,
             "issues": issues,
             "extracted_fields": extracted,
+            "eligibility_assessment": eligibility,
             "file_url": file_url,
         }
         return json.dumps(summary)
@@ -211,9 +234,12 @@ async def validate_document(
         logger.exception("Error in validate_document tool: %s", e)
         return json.dumps({
             "is_valid": False,
+            "document_type": expected_doc_type or "general_document",
             "client_message": "We received your file but encountered a temporary issue inspecting it. Our team will review it manually.",
             "issues": [str(e)],
+            "eligibility_assessment": {},
         })
+
 
 
 async def check_available_slots(

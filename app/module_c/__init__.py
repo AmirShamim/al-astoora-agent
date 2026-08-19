@@ -22,6 +22,10 @@ from app.module_c.documents import (
     update_document_status,
     get_document,
     list_documents,
+    record_document_submission,
+    get_recent_submissions,
+    get_document_submission,
+    SUBMISSIONS_COLLECTION,
 )
 from app.module_c.bookings import (
     check_available_slots,
@@ -50,6 +54,10 @@ __all__ = [
     "update_document_status",
     "get_document",
     "list_documents",
+    "record_document_submission",
+    "get_recent_submissions",
+    "get_document_submission",
+    "SUBMISSIONS_COLLECTION",
     "check_available_slots",
     "book_appointment",
     "cancel_appointment",
@@ -60,3 +68,4 @@ __all__ = [
     "clear_session",
     "clear_session_cache",
 ]
+

@@ -179,29 +179,34 @@ async def test_tool_validate_document_success():
         "is_valid": True,
         "issues": [],
         "client_message": "Thank you! Your passport has been successfully verified.",
+        "eligibility_assessment": {"status": "eligible", "service_track": "sg_company_registration"},
         "file_url": "gs://al-astoora-documents/passport.jpg",
     }
     with patch("app.module_d.validator.validate_document", new_callable=AsyncMock) as mock_val_fn:
         with patch("app.module_c.documents.update_document_status", new_callable=AsyncMock) as mock_update_fn:
-            mock_val_fn.return_value = mock_val
-            mock_update_fn.return_value = {"success": True}
+            with patch("app.module_c.documents.record_document_submission", new_callable=AsyncMock) as mock_record_fn:
+                mock_val_fn.return_value = mock_val
+                mock_update_fn.return_value = {"success": True}
+                mock_record_fn.return_value = {"success": True, "submission_id": "sub_123"}
 
-            res = await validate_document(
-                media_id="media_123",
-                expected_doc_type="passport",
-                client_phone="6591234567",
-                original_filename="passport.jpg",
-            )
-            parsed = json.loads(res)
-            assert parsed["is_valid"] is True
-            assert "passport" in parsed["document_type"]
-            mock_update_fn.assert_called_once_with(
-                phone="6591234567",
-                doc_type="passport",
-                status="validated",
-                file_url="gs://al-astoora-documents/passport.jpg",
-                rejection_reason=None,
-            )
+                res = await validate_document(
+                    media_id="media_123",
+                    expected_doc_type="passport",
+                    client_phone="6591234567",
+                    original_filename="passport.jpg",
+                )
+                parsed = json.loads(res)
+                assert parsed["is_valid"] is True
+                assert "passport" in parsed["document_type"]
+                assert parsed["eligibility_assessment"]["status"] == "eligible"
+                mock_record_fn.assert_called_once()
+                mock_update_fn.assert_called_once_with(
+                    phone="6591234567",
+                    doc_type="passport",
+                    status="validated",
+                    file_url="gs://al-astoora-documents/passport.jpg",
+                    rejection_reason=None,
+                )
 
 
 @pytest.mark.asyncio
@@ -214,27 +219,32 @@ async def test_tool_validate_document_rejected():
         "is_valid": False,
         "issues": ["expired passport date 2024-01-01"],
         "client_message": "Your passport appears to be expired. Please send a valid passport.",
+        "eligibility_assessment": {},
         "file_url": "gs://al-astoora-documents/passport_expired.jpg",
     }
     with patch("app.module_d.validator.validate_document", new_callable=AsyncMock) as mock_val_fn:
         with patch("app.module_c.documents.update_document_status", new_callable=AsyncMock) as mock_update_fn:
-            mock_val_fn.return_value = mock_val
-            mock_update_fn.return_value = {"success": True}
+            with patch("app.module_c.documents.record_document_submission", new_callable=AsyncMock) as mock_record_fn:
+                mock_val_fn.return_value = mock_val
+                mock_update_fn.return_value = {"success": True}
+                mock_record_fn.return_value = {"success": True, "submission_id": "sub_999"}
 
-            res = await validate_document(
-                media_id="media_999",
-                expected_doc_type="passport",
-                client_phone="6591234567",
-            )
-            parsed = json.loads(res)
-            assert parsed["is_valid"] is False
-            mock_update_fn.assert_called_once_with(
-                phone="6591234567",
-                doc_type="passport",
-                status="rejected",
-                file_url="gs://al-astoora-documents/passport_expired.jpg",
-                rejection_reason="expired passport date 2024-01-01",
-            )
+                res = await validate_document(
+                    media_id="media_999",
+                    expected_doc_type="passport",
+                    client_phone="6591234567",
+                )
+                parsed = json.loads(res)
+                assert parsed["is_valid"] is False
+                mock_record_fn.assert_called_once()
+                mock_update_fn.assert_called_once_with(
+                    phone="6591234567",
+                    doc_type="passport",
+                    status="rejected",
+                    file_url="gs://al-astoora-documents/passport_expired.jpg",
+                    rejection_reason="expired passport date 2024-01-01",
+                )
+
 
 
 @pytest.mark.asyncio
