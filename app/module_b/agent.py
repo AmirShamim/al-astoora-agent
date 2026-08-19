@@ -190,7 +190,8 @@ def _build_user_event_prompt(
     doc_action = (
         f"\n- Document Intake Action: User uploaded a file (Media ID: {message.media_id}). "
         f"Call 'validate_document' with media_id='{message.media_id}', expected_doc_type='auto_detect', "
-        f"client_phone='{message.sender_phone}' to inspect, validate, assess eligibility, and record to database."
+        f"client_phone='{message.sender_phone}' to inspect, validate, assess eligibility, and record to database. "
+        f"When replying, use the tool client_message directly or include the status emoji ('✅' for valid, '⚠️' for errors/rejected)."
         if message.media_id
         else ""
     )
@@ -234,6 +235,7 @@ async def _execute_agent_turn(
     """
     dispatched_via_tool = False
     dispatched_message_text: Optional[str] = None
+    last_validation_is_valid = None
 
     # Direct GenAI model invocation with multi-turn tool loop
     try:
@@ -373,6 +375,15 @@ async def _execute_agent_turn(
                                 if inspect.isawaitable(tool_result):
                                     tool_result = await tool_result
                                 logger.info("Tool %s result: %s", fn_name, str(tool_result)[:200])
+
+                                # Track document validation outcome to ensure emoji highlight in final message
+                                if fn_name == "validate_document":
+                                    try:
+                                        val_obj = json.loads(str(tool_result)) if isinstance(tool_result, str) else tool_result
+                                        if isinstance(val_obj, dict):
+                                            last_validation_is_valid = val_obj.get("is_valid")
+                                    except Exception:
+                                        pass
                             except Exception as tool_err:
                                 logger.exception("Tool %s execution failed: %s", fn_name, tool_err)
                                 tool_result = f"Tool execution error: {str(tool_err)}"
@@ -410,6 +421,14 @@ async def _execute_agent_turn(
 
             # No more tool calls
             text_result = getattr(response, "text", None)
+            if text_result and isinstance(text_result, str):
+                text_result = text_result.strip()
+                # Enforce emoji status prefix if document validation just occurred
+                if last_validation_is_valid is False and not any(text_result.startswith(e) for e in ("⚠️", "❌", "🚫", "❗")):
+                    text_result = f"⚠️ {text_result}"
+                elif last_validation_is_valid is True and not any(text_result.startswith(e) for e in ("✅", "🎉", "👍", "📋")):
+                    text_result = f"✅ {text_result}"
+
             logger.info(
                 "GenAI finished (turn %d): text='%s', dispatched_via_tool=%s",
                 turn,
