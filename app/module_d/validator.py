@@ -65,11 +65,138 @@ def close_genai_client() -> None:
     _genai_client = None
 
 
+# Rigid canonical enum constants for corporate data integrity
+VALID_DOC_TYPES = {
+    "passport",
+    "proof_of_address",
+    "trade_license",
+    "bank_statement",
+    "tax_assessment",
+    "director_resolution",
+    "company_constitution",
+    "acra_bizfile",
+    "invoice",
+    "resume",
+    "employment_contract",
+    "general_document",
+}
+
+VALID_SERVICE_TRACKS = {
+    "sg_company_registration",
+    "accounting_services",
+    "immigration_consulting",
+    "general_corporate_services",
+}
+
+VALID_ELIGIBILITY_STATUSES = {
+    "eligible",
+    "ineligible",
+    "pending_review",
+}
+
+
+def _normalize_doc_type(raw_type: Any, fallback: str = "general_document") -> str:
+    """Deterministically normalizes any arbitrary document type string into a rigid canonical enum."""
+    if not raw_type:
+        return fallback
+    clean = re.sub(r"[^a-zA-Z0-9_]", "_", str(raw_type).strip().lower()).strip("_")
+
+    alias_map = {
+        "trade_license": "trade_license",
+        "tradelicense": "trade_license",
+        "commercial_license": "trade_license",
+        "business_license": "trade_license",
+        "tl": "trade_license",
+        "passport": "passport",
+        "passport_scan": "passport",
+        "passport_photo": "passport",
+        "passport_copy": "passport",
+        "proof_of_address": "proof_of_address",
+        "address_proof": "proof_of_address",
+        "utility_bill": "proof_of_address",
+        "bank_statement": "bank_statement",
+        "bank_stmt": "bank_statement",
+        "bank_statements": "bank_statement",
+        "tax_assessment": "tax_assessment",
+        "tax_return": "tax_assessment",
+        "corporate_tax": "tax_assessment",
+        "director_resolution": "director_resolution",
+        "directors_resolution": "director_resolution",
+        "board_resolution": "director_resolution",
+        "company_constitution": "company_constitution",
+        "constitution": "company_constitution",
+        "memorandum": "company_constitution",
+        "articles_of_association": "company_constitution",
+        "acra_bizfile": "acra_bizfile",
+        "bizfile": "acra_bizfile",
+        "acra": "acra_bizfile",
+        "acra_profile": "acra_bizfile",
+        "invoice": "invoice",
+        "invoices_receipts": "invoice",
+        "receipt": "invoice",
+        "resume": "resume",
+        "resume_cv": "resume",
+        "cv": "resume",
+        "employment_contract": "employment_contract",
+        "contract": "employment_contract",
+        "employment_offer_letter": "employment_contract",
+        "general_document": "general_document",
+    }
+
+    if clean in alias_map:
+        return alias_map[clean]
+    if clean in VALID_DOC_TYPES:
+        return clean
+    return fallback if fallback in VALID_DOC_TYPES else "general_document"
+
+
+def _normalize_eligibility_status(raw_status: Any, is_valid: bool) -> str:
+    """Deterministically normalizes eligibility status to strictly 'eligible', 'ineligible', or 'pending_review'."""
+    clean = str(raw_status or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if clean in ("eligible", "qualified", "approved", "valid", "pass", "true"):
+        return "eligible"
+    if clean in ("ineligible", "not_eligible", "disqualified", "rejected", "failed", "false", "no"):
+        return "ineligible"
+    if clean in ("pending", "pending_review", "needs_review", "review", "partial", "under_review"):
+        return "pending_review"
+    return "eligible" if is_valid else "ineligible"
+
+
+def _normalize_service_track(raw_track: Any, doc_type: str) -> str:
+    """Deterministically normalizes service track to one of the 4 rigid system tracks."""
+    clean = str(raw_track or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if clean in (
+        "sg_company_registration",
+        "sg_reg",
+        "company_registration",
+        "incorporation",
+        "secretarial",
+        "corporate_secretarial",
+        "corporate_secretarial_compliance",
+    ):
+        return "sg_company_registration"
+    if clean in ("accounting_services", "accounting", "tax", "bookkeeping", "tax_compliance"):
+        return "accounting_services"
+    if clean in ("immigration_consulting", "immigration", "visa", "employment_pass"):
+        return "immigration_consulting"
+    if clean in VALID_SERVICE_TRACKS:
+        return clean
+
+    # Infer standard track from document type
+    if doc_type in ("passport", "proof_of_address", "director_resolution", "acra_bizfile", "company_constitution"):
+        return "sg_company_registration"
+    if doc_type in ("bank_statement", "tax_assessment", "invoice"):
+        return "accounting_services"
+    if doc_type in ("resume", "employment_contract"):
+        return "immigration_consulting"
+    return "general_corporate_services"
+
+
 def _build_validation_prompt(expected_doc_type: str, current_date_str: str) -> str:
-    """Constructs the prompt for Gemini 3.7 Flash multimodal document validation and eligibility assessment."""
+    """Constructs the prompt for Gemini 3.7 Flash multimodal document validation with strict enum constraints."""
     is_auto = expected_doc_type.lower() in ("auto_detect", "auto", "general_document", "general", "")
     target_clause = (
-        "Identify the exact document type from visual analysis (e.g. passport, trade_license, bank_statement, "
+        "Classify the document into one of the allowed document types (passport, trade_license, bank_statement, "
         "tax_assessment, director_resolution, company_constitution, acra_bizfile, invoice, resume, employment_contract)."
         if is_auto
         else f"Examine the attached file which is expected to be a '{expected_doc_type}'."
@@ -90,7 +217,13 @@ Validate the document according to these strict professional criteria:
 4. Signature & Authentication: If the document is a director resolution, contract, or legal agreement, verify if it is signed/executed.
 5. Corporate Eligibility & Business Insights:
    - Extract business insights (Company Name, Registration/UEN/Tax ID, Registered Capital, Directors/Officers, Financial figures).
-   - Evaluate eligibility for professional services (e.g. Singapore company registration, corporate secretarial compliance, automated bookkeeping pipeline, or employment visa).
+   - Evaluate eligibility for professional services.
+
+CRITICAL SCHEMA REQUIREMENTS (STRICT ENUMS ONLY - NO EXCEPTIONS):
+- 'document_type' MUST be strictly one of: ["passport", "proof_of_address", "trade_license", "bank_statement", "tax_assessment", "director_resolution", "company_constitution", "acra_bizfile", "invoice", "resume", "employment_contract", "general_document"]
+- 'is_valid' MUST be boolean: true or false
+- 'eligibility_assessment.status' MUST be strictly one of: ["eligible", "ineligible", "pending_review"]
+- 'eligibility_assessment.service_track' MUST be strictly one of: ["sg_company_registration", "accounting_services", "immigration_consulting", "general_corporate_services"]
 
 Client Message Guidelines:
 Write a friendly, polite 1-2 sentence message to the client on WhatsApp:
@@ -99,7 +232,7 @@ Write a friendly, polite 1-2 sentence message to the client on WhatsApp:
 
 Respond strictly in valid JSON matching this exact schema:
 {{
-  "document_type": "{expected_doc_type if not is_auto else 'detected_document_type'}",
+  "document_type": "{_normalize_doc_type(expected_doc_type, fallback='trade_license' if is_auto else 'general_document')}",
   "extracted_fields": {{
     "key": "value"
   }},
@@ -117,7 +250,7 @@ Respond strictly in valid JSON matching this exact schema:
 
 
 def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[str, Any]:
-    """Parses and sanitizes Gemini JSON output with robust fallbacks."""
+    """Parses, sanitizes, and deterministically normalizes Gemini JSON output with strict enum guarantees."""
     cleaned = raw_text.strip()
     # Strip markdown fences if present
     if cleaned.startswith("```json"):
@@ -142,50 +275,91 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
         else:
             data = None
 
-    fallback_doc_type = "general_document" if expected_doc_type.lower() in ("auto_detect", "auto", "") else expected_doc_type
+    fallback_doc = _normalize_doc_type(expected_doc_type, fallback="general_document")
 
     if not isinstance(data, dict):
         logger.error("Gemini response did not produce a valid dictionary: %s", raw_text)
         return {
-            "document_type": fallback_doc_type,
+            "document_type": fallback_doc,
             "extracted_fields": {},
             "is_valid": False,
             "issues": ["AI validation response could not be parsed"],
             "client_message": "We received your document, but could not process it automatically. Our team will review it shortly.",
-            "eligibility_assessment": {},
+            "eligibility_assessment": {
+                "status": "ineligible",
+                "service_track": "general_corporate_services",
+                "summary": "Document could not be parsed automatically.",
+                "recommended_next_step": "Please submit a clear image or document file.",
+            },
         }
 
-    # Ensure required keys exist with proper types
-    doc_type = str(data.get("document_type") or fallback_doc_type)
+    # 1. Rigidly normalize is_valid
+    is_valid = bool(data.get("is_valid", False))
+
+    # 2. Rigidly normalize document_type
+    raw_doc_type = data.get("document_type") or fallback_doc
+    norm_doc_type = _normalize_doc_type(raw_doc_type, fallback=fallback_doc)
+
+    # 3. Rigidly normalize extracted_fields
     extracted_fields = data.get("extracted_fields")
     if not isinstance(extracted_fields, dict):
         extracted_fields = {}
 
-    is_valid = bool(data.get("is_valid", False))
+    # 4. Rigidly normalize issues
     issues = data.get("issues")
     if not isinstance(issues, list):
         issues = [str(issues)] if issues else []
 
-    eligibility = data.get("eligibility_assessment")
-    if not isinstance(eligibility, dict):
-        eligibility = {}
+    # 5. Rigidly normalize eligibility_assessment
+    raw_eligibility = data.get("eligibility_assessment")
+    if not isinstance(raw_eligibility, dict):
+        raw_eligibility = {}
 
-    client_msg = str(data.get("client_message") or "")
+    norm_status = _normalize_eligibility_status(raw_eligibility.get("status"), is_valid=is_valid)
+    norm_track = _normalize_service_track(raw_eligibility.get("service_track"), doc_type=norm_doc_type)
+    
+    summary_text = str(raw_eligibility.get("summary") or "").strip()
+    if not summary_text:
+        summary_text = (
+            f"Document successfully verified for {norm_track}."
+            if is_valid
+            else f"Document validation failed for {norm_track} due to issues detected."
+        )
+
+    next_step_text = str(raw_eligibility.get("recommended_next_step") or "").strip()
+    if not next_step_text:
+        next_step_text = (
+            "Proceed with remaining required onboarding documents."
+            if is_valid
+            else "Please provide a valid, unexpired, and legible document to continue."
+        )
+
+    eligibility_assessment = {
+        "status": norm_status,
+        "service_track": norm_track,
+        "summary": summary_text,
+        "recommended_next_step": next_step_text,
+    }
+
+    # 6. Rigidly normalize client_message
+    client_msg = str(data.get("client_message") or "").strip()
     if not client_msg:
+        friendly_name = norm_doc_type.replace("_", " ")
         if is_valid:
-            client_msg = f"Thank you! Your {doc_type.replace('_', ' ')} has been successfully verified."
+            client_msg = f"Thank you! Your {friendly_name} has been successfully verified."
         else:
             issues_str = ", ".join(issues) if issues else "the document could not be validated"
-            client_msg = f"We noticed an issue with your {doc_type.replace('_', ' ')}: {issues_str}. Please send a clearer document."
+            client_msg = f"We noticed an issue with your {friendly_name}: {issues_str}. Please send a clearer document."
 
     return {
-        "document_type": doc_type,
+        "document_type": norm_doc_type,
         "extracted_fields": extracted_fields,
         "is_valid": is_valid,
         "issues": issues,
         "client_message": client_msg,
-        "eligibility_assessment": eligibility,
+        "eligibility_assessment": eligibility_assessment,
     }
+
 
 
 async def analyze_document_with_gemini(

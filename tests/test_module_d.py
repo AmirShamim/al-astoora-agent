@@ -331,7 +331,50 @@ def test_parse_gemini_json_response_malformed():
 
     assert parsed["is_valid"] is False
     assert parsed["document_type"] == "proof_of_address"
+    assert parsed["eligibility_assessment"]["status"] == "ineligible"
+    assert parsed["eligibility_assessment"]["service_track"] == "sg_company_registration"
     assert len(parsed["issues"]) >= 1
+
+
+def test_parse_gemini_json_response_normalizes_hallucinated_enums():
+    """Test that arbitrary strings like 'not_eligible', 'corporate_secretarial_compliance', or 'n/a' are strictly normalized."""
+    raw_json_with_variations = json.dumps({
+        "document_type": "trade license",
+        "extracted_fields": {"company_name": "AL NOOR TRADING L.L.C"},
+        "is_valid": False,
+        "issues": ["Expired trade license"],
+        "client_message": "Your trade license has expired.",
+        "eligibility_assessment": {
+            "status": "not_eligible",
+            "service_track": "corporate_secretarial_compliance",
+            "summary": "Trade license is expired.",
+            "recommended_next_step": "Renew license.",
+        },
+    })
+
+    parsed = _parse_gemini_json_response(raw_json_with_variations, "trade_license")
+    assert parsed["document_type"] == "trade_license"
+    assert parsed["is_valid"] is False
+    # Must be rigidly mapped to 'ineligible' and 'sg_company_registration'
+    assert parsed["eligibility_assessment"]["status"] == "ineligible"
+    assert parsed["eligibility_assessment"]["service_track"] == "sg_company_registration"
+
+    # Test 'n/a' service track mapping
+    raw_json_na = json.dumps({
+        "document_type": "unknown_file",
+        "extracted_fields": {},
+        "is_valid": False,
+        "issues": ["Invalid file"],
+        "eligibility_assessment": {
+            "status": "rejected",
+            "service_track": "n/a",
+        },
+    })
+    parsed_na = _parse_gemini_json_response(raw_json_na, "auto_detect")
+    assert parsed_na["document_type"] == "general_document"
+    assert parsed_na["eligibility_assessment"]["status"] == "ineligible"
+    assert parsed_na["eligibility_assessment"]["service_track"] == "general_corporate_services"
+
 
 
 @pytest.mark.asyncio
@@ -545,6 +588,11 @@ async def test_validate_document_invalid_document_flagged():
                     expected_doc_type="passport",
                     client_phone="6591234567",
                 )
+                assert result["success"] is True
+                assert result["is_valid"] is False
+                assert len(result["issues"]) == 2
+                assert "blurry" in result["client_message"].lower()
+
 
 @pytest.mark.asyncio
 async def test_validate_document_auto_detect_doc_type():
