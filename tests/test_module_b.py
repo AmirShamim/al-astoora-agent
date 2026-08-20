@@ -817,3 +817,63 @@ def test_build_thinking_config_fallback_model():
     if cfg is not None:
         assert getattr(cfg, "thinking_budget", None) == 0 or getattr(cfg, "thinking_level", None) == "low"
 
+
+# ==============================================================================
+# 8. Anti-Repetition, Brand Guardrails & Message Debouncing Tests
+# ==============================================================================
+
+def test_system_prompt_anti_repetition_and_brand_guardrails():
+    """Verify system prompt enforces anti-repetition and deflects generic programming code."""
+    from app.module_b.system_prompt import SYSTEM_PROMPT
+
+    assert "ANTI-REPETITION DIRECTIVE" in SYSTEM_PROMPT
+    assert "NEVER repeat the same document request" in SYSTEM_PROMPT
+    assert "DO NOT act as a general programming assistant" in SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_message_debouncing_and_merging():
+    """Verify that multiple rapid messages from the same sender are aggregated into a single turn."""
+    from app.module_b.agent import process_message, _process_buffered_messages, _USER_QUEUES
+    from unittest.mock import AsyncMock, patch
+
+    phone = "6588880000"
+
+    msg1 = ParsedMessage(
+        sender_phone=phone,
+        profile_name="Alex",
+        message_type="text",
+        message_content="Hello",
+        media_id=None,
+        media_filename=None,
+        raw_timestamp="1723852800",
+        raw_message_id="wamid.msg1",
+        metadata={},
+    )
+    msg2 = ParsedMessage(
+        sender_phone=phone,
+        profile_name="Alex",
+        message_type="text",
+        message_content="What services do you offer?",
+        media_id=None,
+        media_filename=None,
+        raw_timestamp="1723852801",
+        raw_message_id="wamid.msg2",
+        metadata={},
+    )
+
+    with patch("app.module_b.agent.send_typing_indicator", new_callable=AsyncMock):
+        with patch("app.module_b.agent._process_single_message_turn", new_callable=AsyncMock) as mock_single_turn:
+            # Send 2 rapid messages
+            await process_message(msg1, debounce=True)
+            await process_message(msg2, debounce=True)
+
+            # Manually trigger buffer resolution
+            await _process_buffered_messages(phone)
+
+            # Assert _process_single_message_turn was called once with merged text
+            assert mock_single_turn.call_count == 1
+            effective_msg = mock_single_turn.call_args[0][0]
+            assert "Hello\nWhat services do you offer?" in effective_msg.message_content
+
+

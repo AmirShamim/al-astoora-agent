@@ -5,6 +5,7 @@ ParsedMessage events from Module A, executing tools, and delivering WhatsApp res
 """
 
 import asyncio
+from dataclasses import dataclass, field
 import inspect
 import json
 import logging
@@ -194,7 +195,10 @@ def _build_user_event_prompt(
         else "New incoming inquiry."
     )
 
-    state_section = f"\n- Live Business Context (Module C): {state_summary}" if state_summary else ""
+    state_section = (
+        f"\n- Background Onboarding Context (INTERNAL ONLY - DO NOT repeat this or ask for documents unless directly relevant to user query): {state_summary}"
+        if state_summary else ""
+    )
     doc_action = (
         f"\n- Document Intake Action: User uploaded a file (Media ID: {message.media_id}). "
         f"Call 'validate_document' with media_id='{message.media_id}', expected_doc_type='auto_detect', "
@@ -227,7 +231,8 @@ def _build_user_event_prompt(
 - Tomorrow's Date: {tomorrow_friendly} (Tomorrow: {tomorrow_iso})
 - Media Details: {media_info}
 - Metadata: {metadata_json}
-- Conversation Status: {convo_status}{state_section}{doc_action}{booking_action}"""
+- Conversation Status: {convo_status}{state_section}{doc_action}{booking_action}
+- Conversational Directive: Address the user's specific inquiry directly and naturally. NEVER repeat previous document requests or closing slogans unless the user is actively asking about documents or onboarding progress."""
 
 
 
@@ -516,49 +521,60 @@ async def _execute_agent_turn(
         return (None, dispatched_via_tool, dispatched_message_text)
 
 
-async def process_message(message: ParsedMessage) -> None:
+@dataclass
+class _UserMessageQueue:
+    messages: List[ParsedMessage] = field(default_factory=list)
+    timer_task: Optional[asyncio.Task] = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+_USER_QUEUES: Dict[str, _UserMessageQueue] = {}
+_USER_QUEUES_LOCK = asyncio.Lock()
+DEBOUNCE_DELAY_SECONDS = 1.5
+
+
+async def _get_or_create_user_queue(sender_phone: str) -> _UserMessageQueue:
+    async with _USER_QUEUES_LOCK:
+        if sender_phone not in _USER_QUEUES:
+            _USER_QUEUES[sender_phone] = _UserMessageQueue()
+        return _USER_QUEUES[sender_phone]
+
+
+async def _process_single_message_turn(message: ParsedMessage) -> None:
     """
-    Main asynchronous message processing hook registered with Module A router.
-    Orchestrates the entire agent response lifecycle with blue tick read receipts,
-    multi-turn Firestore state persistence, and human typing pacing.
+    Executes a single reasoning and tool loop turn for an aggregated user message event.
     """
     sender_phone = message.sender_phone
     profile_name = message.profile_name or "Client"
 
     logger.info(
-        "Module B processing message from %s (%s) [type=%s]",
+        "Module B executing turn for %s (%s) [type=%s, content='%s']",
         profile_name,
         sender_phone,
         message.message_type,
+        (message.message_content or "")[:80],
     )
-
-    # 1. Trigger blue tick read receipt and dispatch typing indicator immediately on WhatsApp
-    if message.raw_message_id:
-        try:
-            await send_typing_indicator(message.raw_message_id)
-        except Exception as read_err:
-            logger.warning("Could not send typing indicator for message %s: %s", message.raw_message_id, read_err)
 
     try:
         agent = get_agent()
 
-        # 2. Check live conversation history & Firestore business state
+        # 1. Check live conversation history & Firestore business state
         from app.module_c.sessions import get_session_history, append_session_message
         past_history = await get_session_history(sender_phone, max_messages=10)
         is_continuing = len(past_history) > 0
         state_summary = await _get_client_state_summary(sender_phone)
 
-        # 3. Build enriched context prompt
+        # 2. Build enriched context prompt
         prompt = _build_user_event_prompt(
             message,
             state_summary=state_summary,
             is_continuing_convo=is_continuing,
         )
 
-        # 4. Execute agent reasoning & tool calling loop
+        # 3. Execute agent reasoning & tool calling loop
         response_text, dispatched_via_tool, dispatched_message_text = await _execute_agent_turn(agent, prompt, message)
 
-        # 5. Format incoming user text for persistent session recording
+        # 4. Format incoming user text for persistent session recording
         user_text = message.message_content
         if not user_text or not str(user_text).strip():
             if message.media_filename:
@@ -618,6 +634,104 @@ async def process_message(message: ParsedMessage) -> None:
             await send_text_message(recipient_phone=sender_phone, text=fallback_msg)
         except Exception as send_err:
             logger.error("Failed to send fallback message to %s: %s", sender_phone, send_err)
+
+
+async def _process_buffered_messages(sender_phone: str) -> None:
+    """
+    Executes after the debounce timer expires.
+    Merges all accumulated messages from the sender and processes them in a single agent turn.
+    """
+    queue = await _get_or_create_user_queue(sender_phone)
+    async with queue.lock:
+        if not queue.messages:
+            return
+
+        buffered_messages = list(queue.messages)
+        queue.messages.clear()
+
+        # Merge message contents
+        combined_text_parts = []
+        primary_msg = buffered_messages[-1]
+        has_media: Optional[ParsedMessage] = None
+
+        for msg in buffered_messages:
+            content = (msg.message_content or "").strip()
+            if content:
+                combined_text_parts.append(content)
+            if msg.media_id and not has_media:
+                has_media = msg
+
+        merged_content = "\n".join(combined_text_parts) if combined_text_parts else (primary_msg.message_content or "")
+
+        if has_media:
+            effective_msg = ParsedMessage(
+                sender_phone=sender_phone,
+                profile_name=has_media.profile_name or primary_msg.profile_name,
+                message_type=has_media.message_type,
+                message_content=merged_content or has_media.message_content,
+                media_id=has_media.media_id,
+                media_mime_type=has_media.media_mime_type,
+                media_sha256=has_media.media_sha256,
+                media_filename=has_media.media_filename,
+                raw_message_id=primary_msg.raw_message_id,
+                timestamp=primary_msg.timestamp,
+                metadata=primary_msg.metadata,
+            )
+        else:
+            effective_msg = ParsedMessage(
+                sender_phone=sender_phone,
+                profile_name=primary_msg.profile_name,
+                message_type=primary_msg.message_type,
+                message_content=merged_content,
+                media_id=primary_msg.media_id,
+                media_mime_type=primary_msg.media_mime_type,
+                media_sha256=primary_msg.media_sha256,
+                media_filename=primary_msg.media_filename,
+                raw_message_id=primary_msg.raw_message_id,
+                timestamp=primary_msg.timestamp,
+                metadata=primary_msg.metadata,
+            )
+
+        await _process_single_message_turn(effective_msg)
+
+
+async def process_message(message: ParsedMessage, debounce: bool = True) -> None:
+    """
+    Main asynchronous message processing hook registered with Module A router.
+    Immediately dispatches WhatsApp typing indicator, then buffers rapid consecutive messages
+    with a 1.5s debounce window before executing agent reasoning to prevent concurrent multi-replies.
+    """
+    sender_phone = message.sender_phone
+
+    # 1. Immediately send typing indicator to manage user perception
+    if message.raw_message_id:
+        try:
+            await send_typing_indicator(message.raw_message_id)
+        except Exception as read_err:
+            logger.warning("Could not send typing indicator for message %s: %s", message.raw_message_id, read_err)
+
+    if not debounce:
+        await _process_single_message_turn(message)
+        return
+
+    # 2. Buffer message and debounce
+    queue = await _get_or_create_user_queue(sender_phone)
+    queue.messages.append(message)
+
+    # If there is already a running debounce timer for this sender, cancel it to extend the window
+    if queue.timer_task and not queue.timer_task.done():
+        queue.timer_task.cancel()
+
+    async def _timer_worker():
+        try:
+            await asyncio.sleep(DEBOUNCE_DELAY_SECONDS)
+            await _process_buffered_messages(sender_phone)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.exception("Error in debounce worker for %s: %s", sender_phone, e)
+
+    queue.timer_task = asyncio.create_task(_timer_worker())
 
 
 root_agent = None  # Lazy initialization via get_agent()
