@@ -78,13 +78,17 @@ def create_adk_agent() -> Any:
     model_name = settings.GEMINI_MODEL or "gemini-3.7-flash"
     logger.info("Initializing Google ADK Agent 'al_astoora_agent' with model: %s", model_name)
 
-    agent = Agent(
-        name="al_astoora_agent",
-        model=model_name,
-        instruction=SYSTEM_PROMPT,
-        tools=ALL_TOOLS,
-    )
-    return agent
+    try:
+        agent = Agent(
+            name="al_astoora_agent",
+            model=model_name,
+            instruction=SYSTEM_PROMPT,
+            tools=ALL_TOOLS,
+        )
+        return agent
+    except Exception as e:
+        logger.warning("Could not initialize ADK Agent: %s. Will use direct GenAI backend.", e)
+        return None
 
 
 def get_agent() -> Any:
@@ -311,7 +315,15 @@ async def _execute_agent_turn(
         if thinking_cfg is not None:
             config_kwargs["thinking_config"] = thinking_cfg
 
-        config = types.GenerateContentConfig(**config_kwargs)
+        try:
+            config = types.GenerateContentConfig(**config_kwargs)
+        except Exception as cfg_err:
+            logger.warning("GenerateContentConfig with thinking_config failed (%s), falling back to standard config", cfg_err)
+            config = types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0.2,
+                tools=func_declarations,
+            )
 
         # 1. Load multi-turn session history for this sender
         past_history = await get_session_history(message.sender_phone, max_messages=10)
@@ -597,6 +609,6 @@ async def process_message(message: ParsedMessage) -> None:
             logger.error("Failed to send fallback message to %s: %s", sender_phone, send_err)
 
 
-root_agent = get_agent()
+root_agent = None  # Lazy initialization via get_agent()
 
 

@@ -471,7 +471,14 @@ async def analyze_document_with_gemini(
         if thinking_cfg is not None:
             config_kwargs["thinking_config"] = thinking_cfg
 
-        config = types.GenerateContentConfig(**config_kwargs)
+        try:
+            config = types.GenerateContentConfig(**config_kwargs)
+        except Exception as cfg_err:
+            logger.warning("Vision GenerateContentConfig with thinking_config failed (%s), falling back", cfg_err)
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+            )
 
         response = None
         for model_name in candidate_models:
