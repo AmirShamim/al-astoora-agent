@@ -105,6 +105,7 @@ Meta WhatsApp Cloud API
 - [x] **Phase 2:** Module C complete (Firestore State Manager: leads, clients, docs, bookings CRUD, 19 tests)
 - [x] **Phase 3:** Module D complete (Document Validation Engine: WhatsApp download, GCS storage, Gemini 3.7 Flash multimodal vision, 16 tests)
 - [x] **Phase 4:** Module B complete (Google ADK Agent Orchestrator, tools, system prompt, fallback recovery, 17 tests)
+  - _Known issue (likely resolved): `e2e-testing-and-submission-plan.md` identified a fallback loop bug in `agent.py`. The bot is functional in production (responds, captures leads, books appointments, validates documents), suggesting this was fixed during development._
 - [ ] **Phase 5:** End-to-end testing
 - [ ] **Phase 6:** Submission (README, architecture diagram, 4-min demo video)
 
