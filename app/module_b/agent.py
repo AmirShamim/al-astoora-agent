@@ -674,7 +674,7 @@ async def _process_buffered_messages(sender_phone: str) -> None:
                 media_sha256=has_media.media_sha256,
                 media_filename=has_media.media_filename,
                 raw_message_id=primary_msg.raw_message_id,
-                timestamp=primary_msg.timestamp,
+                raw_timestamp=primary_msg.raw_timestamp,
                 metadata=primary_msg.metadata,
             )
         else:
@@ -688,7 +688,7 @@ async def _process_buffered_messages(sender_phone: str) -> None:
                 media_sha256=primary_msg.media_sha256,
                 media_filename=primary_msg.media_filename,
                 raw_message_id=primary_msg.raw_message_id,
-                timestamp=primary_msg.timestamp,
+                raw_timestamp=primary_msg.raw_timestamp,
                 metadata=primary_msg.metadata,
             )
 
