@@ -23,26 +23,29 @@ logger = logging.getLogger(__name__)
 _genai_client: Optional[genai.Client] = None
 
 
-def get_genai_client() -> genai.Client:
+def get_genai_client(location: Optional[str] = None) -> genai.Client:
     """
-    Returns the singleton Google GenAI Client for Gemini 3.7 Flash multimodal vision.
-    Configured for Vertex AI or Google AI studio depending on configuration.
+    Returns the singleton Google GenAI Client for Gemini 3.7 Flash multimodal vision and agent orchestration.
+    Uses location="global" by default for Gemini 3.7 / 3.x series models on Vertex AI.
     """
     global _genai_client
-    if _genai_client is None:
-        settings = get_settings()
+    settings = get_settings()
+    target_loc = location or getattr(settings, "GEMINI_LOCATION", "global") or "global"
+
+    if _genai_client is None or getattr(_genai_client, "_location", None) != target_loc:
         logger.info(
             "Initializing Google GenAI Client (Project: %s, Location: %s)",
             settings.GCP_PROJECT_ID,
-            settings.GEMINI_LOCATION,
+            target_loc,
         )
         try:
             # Initialize for Vertex AI backend on GCP
             _genai_client = genai.Client(
                 vertexai=True,
                 project=settings.GCP_PROJECT_ID,
-                location=settings.GEMINI_LOCATION,
+                location=target_loc,
             )
+            setattr(_genai_client, "_location", target_loc)
         except Exception as e:
             logger.warning("Vertex AI initialization fallback to standard GenAI Client: %s", e)
             _genai_client = genai.Client()
@@ -459,7 +462,14 @@ async def analyze_document_with_gemini(
 
         configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
         candidate_models = [configured_model]
-        for fallback in ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash"]:
+        for fallback in [
+            "gemini-3.7-flash",
+            "gemini-3-flash-preview",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+        ]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 

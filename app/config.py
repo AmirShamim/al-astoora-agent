@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     # Model & AI Configuration
     GEMINI_MODEL: str = "gemini-3.7-flash"
-    GEMINI_LOCATION: str = "us-central1"
+    GEMINI_LOCATION: str = "global"     # "global" required for Gemini 3.7 / 3.x models on Vertex AI
     GEMINI_THINKING_LEVEL: str = "low"  # "low" or "off" for fast WhatsApp perception
     GEMINI_THINKING_BUDGET: int = 0     # 0 tokens for no-thinking / minimal latency
 
