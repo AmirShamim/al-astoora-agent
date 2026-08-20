@@ -492,12 +492,14 @@ async def analyze_document_with_gemini(
             )
 
         response = None
+        t_vision_start = asyncio.get_event_loop().time()
         for model_name in candidate_models:
             try:
                 # Dynamically adjust thinking config for the target candidate model
                 if hasattr(config, "thinking_config"):
                     config.thinking_config = _build_thinking_config(model_name, settings)
 
+                logger.info("Invoking Gemini vision model '%s' (location=%s)", model_name, getattr(client, "_location", "global"))
                 if hasattr(client, "aio") and hasattr(client.aio, "models") and hasattr(client.aio.models, "generate_content"):
                     response = await client.aio.models.generate_content(
                         model=model_name,
@@ -515,6 +517,8 @@ async def analyze_document_with_gemini(
                     else:
                         response = res
                 if response is not None:
+                    t_vision_elapsed = (asyncio.get_event_loop().time() - t_vision_start) * 1000
+                    logger.info("✅ Vision model '%s' successfully inspected document in %.0f ms", model_name, t_vision_elapsed)
                     break
             except Exception as model_err:
                 logger.warning("Vision GenAI model '%s' failed: %s. Trying next...", model_name, model_err)

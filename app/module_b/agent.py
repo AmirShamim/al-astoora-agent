@@ -372,12 +372,14 @@ async def _execute_agent_turn(
             logger.info("GenAI turn %d, contents length: %d (session history: %d)", turn, len(contents), len(past_history))
 
             response = None
+            t_start = asyncio.get_event_loop().time()
             for model_name in candidate_models:
                 try:
                     # Dynamically adjust thinking config for the target model
                     if hasattr(config, "thinking_config"):
                         config.thinking_config = _build_thinking_config(model_name, settings)
 
+                    logger.info("Invoking Gemini model '%s' (location=%s)", model_name, getattr(client, "_location", "global"))
                     if hasattr(client, "aio") and hasattr(client.aio, "models"):
                         response = await client.aio.models.generate_content(
                             model=model_name, contents=contents, config=config,
@@ -388,6 +390,8 @@ async def _execute_agent_turn(
                         )
                         response = await res if inspect.isawaitable(res) else res
                     if response is not None:
+                        t_elapsed = (asyncio.get_event_loop().time() - t_start) * 1000
+                        logger.info("✅ Model '%s' successfully generated turn %d in %.0f ms", model_name, turn, t_elapsed)
                         break
                 except Exception as model_err:
                     logger.warning("GenAI model '%s' failed: %s. Trying next candidate...", model_name, model_err)
