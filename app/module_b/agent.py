@@ -75,7 +75,7 @@ def create_adk_agent() -> Any:
     Configured with Gemini, system prompt, and all Module C/D tools.
     """
     settings = get_settings()
-    model_name = settings.GEMINI_MODEL or "gemini-3.7-flash"
+    model_name = settings.GEMINI_MODEL or "gemini-3.6-flash"
     logger.info("Initializing Google ADK Agent 'al_astoora_agent' with model: %s", model_name)
 
     try:
@@ -290,14 +290,14 @@ async def _execute_agent_turn(
 
         client = get_genai_client()
         settings = get_settings()
-        configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
-        # Prioritize Gemini 3.5+ generation models
+        configured_model = settings.GEMINI_MODEL or "gemini-3.6-flash"
+        # Prioritize Gemini 3.6 / 3.x generation models
         candidate_models = [configured_model]
         for fallback in [
+            "gemini-3.6-flash",
             "gemini-3.7-flash",
             "gemini-3-flash-preview",
             "gemini-3.5-flash",
-            "gemini-3.5-pro",
             "gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-1.5-flash",

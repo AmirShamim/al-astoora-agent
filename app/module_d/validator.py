@@ -460,9 +460,10 @@ async def analyze_document_with_gemini(
             mime_type=mime_type or "image/jpeg",
         )
 
-        configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
+        configured_model = settings.GEMINI_MODEL or "gemini-3.6-flash"
         candidate_models = [configured_model]
         for fallback in [
+            "gemini-3.6-flash",
             "gemini-3.7-flash",
             "gemini-3-flash-preview",
             "gemini-3.5-flash",
