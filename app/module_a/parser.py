@@ -17,6 +17,8 @@ class ParsedMessage:
     message_content: str
     media_id: Optional[str] = None
     media_filename: Optional[str] = None
+    media_mime_type: Optional[str] = None
+    media_sha256: Optional[str] = None
     raw_timestamp: str = ""
     raw_message_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -123,15 +125,18 @@ def parse_webhook_payload(payload: Dict[str, Any]) -> Optional[ParsedMessage]:
             image_data = msg.get("image", {})
             media_id = image_data.get("id")
             caption = image_data.get("caption", "")
+            mime_type = image_data.get("mime_type", "image/jpeg")
             return ParsedMessage(
                 sender_phone=sender_phone,
                 profile_name=profile_name,
                 message_type="image",
                 message_content=caption,
                 media_id=media_id,
+                media_mime_type=mime_type,
+                media_sha256=image_data.get("sha256"),
                 raw_timestamp=raw_timestamp,
                 raw_message_id=raw_msg_id,
-                metadata={"mime_type": image_data.get("mime_type", "image/jpeg")},
+                metadata={"mime_type": mime_type},
             )
 
         elif msg_type == "document":
@@ -139,6 +144,7 @@ def parse_webhook_payload(payload: Dict[str, Any]) -> Optional[ParsedMessage]:
             media_id = doc_data.get("id")
             filename = doc_data.get("filename", "document.pdf")
             caption = doc_data.get("caption", "")
+            mime_type = doc_data.get("mime_type", "application/pdf")
             return ParsedMessage(
                 sender_phone=sender_phone,
                 profile_name=profile_name,
@@ -146,9 +152,11 @@ def parse_webhook_payload(payload: Dict[str, Any]) -> Optional[ParsedMessage]:
                 message_content=caption or filename,
                 media_id=media_id,
                 media_filename=filename,
+                media_mime_type=mime_type,
+                media_sha256=doc_data.get("sha256"),
                 raw_timestamp=raw_timestamp,
                 raw_message_id=raw_msg_id,
-                metadata={"mime_type": doc_data.get("mime_type", "application/pdf")},
+                metadata={"mime_type": mime_type},
             )
 
         else:
