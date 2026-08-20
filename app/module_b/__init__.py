@@ -7,6 +7,7 @@ from app.module_b.whatsapp_sender import (
     send_text_message,
     send_button_message,
     send_list_message,
+    send_typing_indicator,
     mark_message_as_read,
 )
 from app.module_b.system_prompt import (
@@ -39,6 +40,7 @@ __all__ = [
     "send_text_message",
     "send_button_message",
     "send_list_message",
+    "send_typing_indicator",
     "mark_message_as_read",
     "SYSTEM_PROMPT",
     "ALL_TOOLS",

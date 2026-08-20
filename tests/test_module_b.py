@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.module_a.parser import ParsedMessage
 from app.module_b.whatsapp_sender import (
+    send_typing_indicator,
     mark_message_as_read,
     send_text_message,
     send_button_message,
@@ -418,6 +419,69 @@ async def test_mark_message_as_read_missing_credentials():
         assert res.get("mock") is True
 
 
+@pytest.mark.asyncio
+async def test_send_typing_indicator_success():
+    """Test send_typing_indicator posts typing status to WhatsApp Cloud API."""
+    with patch("app.module_b.whatsapp_sender.get_settings") as mock_settings:
+        mock_settings.return_value.WHATSAPP_TOKEN = "test_token"
+        mock_settings.return_value.WHATSAPP_PHONE_NUMBER_ID = "1113443245192571"
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"success": True}
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_resp
+
+            res = await send_typing_indicator("wamid.HBgL123456")
+            assert res.get("success") is True
+            mock_post.assert_called_once()
+            call_kwargs = mock_post.call_args[1]
+            assert call_kwargs["json"]["status"] == "read"
+            assert call_kwargs["json"]["message_id"] == "wamid.HBgL123456"
+            assert call_kwargs["json"]["typing_indicator"] == {"type": "text"}
+
+
+@pytest.mark.asyncio
+async def test_send_typing_indicator_fallback_on_400():
+    """Test send_typing_indicator gracefully falls back to basic read receipt on HTTP 400."""
+    with patch("app.module_b.whatsapp_sender.get_settings") as mock_settings:
+        mock_settings.return_value.WHATSAPP_TOKEN = "test_token"
+        mock_settings.return_value.WHATSAPP_PHONE_NUMBER_ID = "1113443245192571"
+
+        mock_resp_400 = MagicMock()
+        mock_resp_400.status_code = 400
+        mock_resp_400.json.return_value = {"error": {"message": "Invalid parameter"}}
+
+        mock_resp_200 = MagicMock()
+        mock_resp_200.status_code = 200
+        mock_resp_200.json.return_value = {"success": True}
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [mock_resp_400, mock_resp_200]
+
+            res = await send_typing_indicator("wamid.HBgL123456")
+            assert res.get("success") is True
+            assert mock_post.call_count == 2
+            first_call_payload = mock_post.call_args_list[0][1]["json"]
+            assert "typing_indicator" in first_call_payload
+            second_call_payload = mock_post.call_args_list[1][1]["json"]
+            assert "typing_indicator" not in second_call_payload
+            assert second_call_payload["status"] == "read"
+
+
+@pytest.mark.asyncio
+async def test_send_typing_indicator_missing_credentials():
+    """Test send_typing_indicator returns gracefully if credentials are not configured."""
+    with patch("app.module_b.whatsapp_sender.get_settings") as mock_settings:
+        mock_settings.return_value.WHATSAPP_TOKEN = ""
+        mock_settings.return_value.WHATSAPP_PHONE_NUMBER_ID = ""
+
+        res = await send_typing_indicator("wamid.123")
+        assert res.get("success") is False
+        assert res.get("mock") is True
+
+
 # ==============================================================================
 # 3. Agent Lifecycle & Prompt Construction Tests
 # ==============================================================================
@@ -482,10 +546,10 @@ async def test_process_message_text_reply_delivery():
     mock_agent.run = MagicMock(return_value="Hello Zayd! We would be delighted to help you incorporate in Singapore.")
 
     with patch("app.module_b.agent.get_agent", return_value=mock_agent):
-        with patch("app.module_b.agent.mark_message_as_read", new_callable=AsyncMock) as mock_read:
+        with patch("app.module_b.agent.send_typing_indicator", new_callable=AsyncMock) as mock_typing:
             with patch("app.module_b.agent.send_text_message", new_callable=AsyncMock) as mock_send:
                 await process_message(msg)
-                mock_read.assert_called_once_with("wamid.text1")
+                mock_typing.assert_called_once_with("wamid.text1")
                 mock_send.assert_called_once_with(
                     recipient_phone="6591234567",
                     text="Hello Zayd! We would be delighted to help you incorporate in Singapore.",
@@ -635,7 +699,7 @@ async def test_process_message_persists_session_on_text():
     mock_agent.run = MagicMock(return_value="Hi Tariq! We offer WhatsApp Automation from $200-$400.")
 
     with patch("app.module_b.agent.get_agent", return_value=mock_agent):
-        with patch("app.module_b.agent.mark_message_as_read", new_callable=AsyncMock):
+        with patch("app.module_b.agent.send_typing_indicator", new_callable=AsyncMock):
             with patch("app.module_b.agent.send_text_message", new_callable=AsyncMock):
                 with patch("app.module_c.firestore_client.get_firestore_client") as mock_db_getter:
                     mock_doc_ref = MagicMock()
@@ -680,7 +744,7 @@ async def test_process_message_persists_session_on_tool_dispatch():
     )
 
     with patch("app.module_b.agent.get_agent"):
-        with patch("app.module_b.agent.mark_message_as_read", new_callable=AsyncMock):
+        with patch("app.module_b.agent.send_typing_indicator", new_callable=AsyncMock):
             with patch("app.module_b.agent._execute_agent_turn", new_callable=AsyncMock) as mock_exec:
                 # Simulate tool dispatching interactive buttons
                 mock_exec.return_value = (None, True, "Please choose your desired service:")

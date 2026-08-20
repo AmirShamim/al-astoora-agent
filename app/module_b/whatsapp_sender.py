@@ -1,7 +1,7 @@
 """
 Module B: WhatsApp Cloud API Message Sender.
 Provides asynchronous functions to send text, interactive buttons, interactive list messages,
-and mark incoming messages as read (blue tick) using persistent Keep-Alive connection pooling.
+dispatch typing indicators, and mark incoming messages as read (blue tick) using persistent Keep-Alive connection pooling.
 """
 
 import logging
@@ -86,6 +86,58 @@ async def mark_message_as_read(message_id: str) -> Dict[str, Any]:
             return {"success": False, "status_code": response.status_code, "error": response_json}
     except Exception as e:
         logger.exception(f"Failed to mark message {message_id} as read: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def send_typing_indicator(message_id: str) -> Dict[str, Any]:
+    """
+    Dispatches a WhatsApp 'typing...' indicator for an incoming message while the Gemini agent
+    processes the prompt to manage user perception and response expectation.
+    Also marks the message as read (blue tick).
+    
+    Args:
+        message_id: The unique WhatsApp message ID (e.g. wamid.HBgL...).
+
+    Returns:
+        Dict with success status and API response or error.
+    """
+    settings = get_settings()
+    if not settings.WHATSAPP_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
+        logger.warning("WhatsApp credentials not configured; skipping send_typing_indicator.")
+        return {"success": False, "error": "Credentials missing", "mock": True}
+
+    if not message_id:
+        return {"success": False, "error": "Missing message_id"}
+
+    url = _build_messages_url(settings.WHATSAPP_PHONE_NUMBER_ID)
+    headers = _build_auth_headers(settings.WHATSAPP_TOKEN)
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+        "typing_indicator": {
+            "type": "text",
+        },
+    }
+
+    try:
+        client = get_http_client()
+        response = await client.post(url, headers=headers, json=payload)
+        response_json = response.json()
+        if response.status_code in (200, 201):
+            logger.info(f"Successfully dispatched WhatsApp typing indicator for message {message_id}.")
+            return {"success": True, "data": response_json}
+        elif response.status_code == 400:
+            # Fallback to standard read receipt if typing_indicator is unsupported
+            logger.warning(
+                f"Typing indicator rejected [{response.status_code}], falling back to basic read receipt: {response_json}"
+            )
+            return await mark_message_as_read(message_id)
+        else:
+            logger.warning(f"WhatsApp Typing Indicator Error [{response.status_code}]: {response_json}")
+            return {"success": False, "status_code": response.status_code, "error": response_json}
+    except Exception as e:
+        logger.exception(f"Failed to dispatch typing indicator for message {message_id}: {e}")
         return {"success": False, "error": str(e)}
 
 

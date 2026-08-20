@@ -27,9 +27,11 @@ from app.module_b.tools import (
     book_appointment,
     send_whatsapp_text,
     send_whatsapp_buttons,
-    send_whatsapp_list,
+from app.module_b.whatsapp_sender import (
+    send_text_message,
+    send_typing_indicator,
+    mark_message_as_read,
 )
-from app.module_b.whatsapp_sender import send_text_message, mark_message_as_read
 
 logger = logging.getLogger(__name__)
 
@@ -460,12 +462,12 @@ async def process_message(message: ParsedMessage) -> None:
         message.message_type,
     )
 
-    # 1. Trigger blue tick read receipt immediately on WhatsApp if message ID is present
+    # 1. Trigger blue tick read receipt and dispatch typing indicator immediately on WhatsApp
     if message.raw_message_id:
         try:
-            await mark_message_as_read(message.raw_message_id)
+            await send_typing_indicator(message.raw_message_id)
         except Exception as read_err:
-            logger.warning("Could not mark message %s as read: %s", message.raw_message_id, read_err)
+            logger.warning("Could not send typing indicator for message %s: %s", message.raw_message_id, read_err)
 
     try:
         agent = get_agent()
