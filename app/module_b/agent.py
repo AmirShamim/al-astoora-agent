@@ -27,6 +27,8 @@ from app.module_b.tools import (
     book_appointment,
     send_whatsapp_text,
     send_whatsapp_buttons,
+    send_whatsapp_list,
+)
 from app.module_b.whatsapp_sender import (
     send_text_message,
     send_typing_indicator,
