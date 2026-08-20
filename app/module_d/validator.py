@@ -382,6 +382,41 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
 
 
 
+def _build_thinking_config(model_name: str, settings: Any) -> Optional[Any]:
+    """
+    Builds ThinkingConfig optimized for fast document validation,
+    setting thinking_level to 'low' for Gemini 3.7 Flash / 3.x series,
+    or thinking_budget=0 for legacy/fallback models to prevent default medium thinking latency.
+    """
+    try:
+        if not hasattr(types, "ThinkingConfig"):
+            return None
+
+        level = getattr(settings, "GEMINI_THINKING_LEVEL", "low") or "low"
+        budget = getattr(settings, "GEMINI_THINKING_BUDGET", 0)
+
+        # Gemini 3.x / 3.7 Flash uses thinking_level ("low", "medium", "high")
+        if "3." in model_name or "gemini-3" in model_name:
+            try:
+                return types.ThinkingConfig(thinking_level=level.lower())
+            except Exception:
+                try:
+                    return types.ThinkingConfig(thinking_budget=budget)
+                except Exception:
+                    return None
+        else:
+            try:
+                return types.ThinkingConfig(thinking_budget=budget)
+            except Exception:
+                try:
+                    return types.ThinkingConfig(thinking_level=level.lower())
+                except Exception:
+                    return None
+    except Exception as e:
+        logger.debug("Could not build thinking_config for validator model %s: %s", model_name, e)
+        return None
+
+
 async def analyze_document_with_gemini(
     file_bytes: bytes,
     mime_type: str,
@@ -422,20 +457,29 @@ async def analyze_document_with_gemini(
             mime_type=mime_type or "image/jpeg",
         )
 
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.1,
-        )
-
         configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
         candidate_models = [configured_model]
         for fallback in ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash"]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 
+        config_kwargs: Dict[str, Any] = {
+            "response_mime_type": "application/json",
+            "temperature": 0.1,
+        }
+        thinking_cfg = _build_thinking_config(configured_model, settings)
+        if thinking_cfg is not None:
+            config_kwargs["thinking_config"] = thinking_cfg
+
+        config = types.GenerateContentConfig(**config_kwargs)
+
         response = None
         for model_name in candidate_models:
             try:
+                # Dynamically adjust thinking config for the target candidate model
+                if hasattr(config, "thinking_config"):
+                    config.thinking_config = _build_thinking_config(model_name, settings)
+
                 if hasattr(client, "aio") and hasattr(client.aio, "models") and hasattr(client.aio.models, "generate_content"):
                     response = await client.aio.models.generate_content(
                         model=model_name,

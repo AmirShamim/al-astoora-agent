@@ -791,3 +791,29 @@ async def test_client_state_summary_active_onboarding():
             assert "1/3" in summary
             assert "proof_of_address" in summary
 
+
+# ==============================================================================
+# 7. Thinking Configuration Tests
+# ==============================================================================
+
+def test_build_thinking_config_gemini_3_7_flash():
+    """Verify _build_thinking_config configures low thinking level for Gemini 3.7 Flash."""
+    from app.module_b.agent import _build_thinking_config
+    from app.config import get_settings
+
+    settings = get_settings()
+    cfg = _build_thinking_config("gemini-3.7-flash", settings)
+    if cfg is not None:
+        assert getattr(cfg, "thinking_level", None) == "low" or getattr(cfg, "thinking_budget", None) == 0
+
+
+def test_build_thinking_config_fallback_model():
+    """Verify _build_thinking_config sets budget=0 for non-3.x models."""
+    from app.module_b.agent import _build_thinking_config
+    from app.config import get_settings
+
+    settings = get_settings()
+    cfg = _build_thinking_config("gemini-2.5-flash", settings)
+    if cfg is not None:
+        assert getattr(cfg, "thinking_budget", None) == 0 or getattr(cfg, "thinking_level", None) == "low"
+

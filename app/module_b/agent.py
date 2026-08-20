@@ -225,6 +225,42 @@ def _build_user_event_prompt(
 
 
 
+def _build_thinking_config(model_name: str, settings: Any) -> Optional[Any]:
+    """
+    Builds ThinkingConfig optimized for low latency WhatsApp messaging,
+    setting thinking_level to 'low' for Gemini 3.7 Flash / 3.x series,
+    or thinking_budget=0 for legacy/fallback models to prevent default medium thinking latency.
+    """
+    try:
+        from google.genai import types
+        if not hasattr(types, "ThinkingConfig"):
+            return None
+
+        level = getattr(settings, "GEMINI_THINKING_LEVEL", "low") or "low"
+        budget = getattr(settings, "GEMINI_THINKING_BUDGET", 0)
+
+        # Gemini 3.x / 3.7 Flash uses thinking_level ("low", "medium", "high")
+        if "3." in model_name or "gemini-3" in model_name:
+            try:
+                return types.ThinkingConfig(thinking_level=level.lower())
+            except Exception:
+                try:
+                    return types.ThinkingConfig(thinking_budget=budget)
+                except Exception:
+                    return None
+        else:
+            try:
+                return types.ThinkingConfig(thinking_budget=budget)
+            except Exception:
+                try:
+                    return types.ThinkingConfig(thinking_level=level.lower())
+                except Exception:
+                    return None
+    except Exception as e:
+        logger.debug("Could not build thinking_config for model %s: %s", model_name, e)
+        return None
+
+
 async def _execute_agent_turn(
     agent: Any,
     prompt: str,
@@ -248,10 +284,10 @@ async def _execute_agent_turn(
 
         client = get_genai_client()
         settings = get_settings()
-        configured_model = settings.GEMINI_MODEL or "gemini-2.5-flash"
+        configured_model = settings.GEMINI_MODEL or "gemini-3.7-flash"
         # Support fallback models in order of priority
         candidate_models = [configured_model]
-        for fallback in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.7-flash"]:
+        for fallback in ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 
@@ -264,11 +300,16 @@ async def _execute_agent_turn(
             except Exception as td_err:
                 logger.warning("Could not add tool %s: %s", tool_fn.__name__, td_err)
 
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            temperature=0.2,
-            tools=func_declarations,
-        )
+        config_kwargs: Dict[str, Any] = {
+            "system_instruction": SYSTEM_PROMPT,
+            "temperature": 0.2,
+            "tools": func_declarations,
+        }
+        thinking_cfg = _build_thinking_config(configured_model, settings)
+        if thinking_cfg is not None:
+            config_kwargs["thinking_config"] = thinking_cfg
+
+        config = types.GenerateContentConfig(**config_kwargs)
 
         # 1. Load multi-turn session history for this sender
         past_history = await get_session_history(message.sender_phone, max_messages=10)
@@ -312,6 +353,10 @@ async def _execute_agent_turn(
             response = None
             for model_name in candidate_models:
                 try:
+                    # Dynamically adjust thinking config for the target model
+                    if hasattr(config, "thinking_config"):
+                        config.thinking_config = _build_thinking_config(model_name, settings)
+
                     if hasattr(client, "aio") and hasattr(client.aio, "models"):
                         response = await client.aio.models.generate_content(
                             model=model_name, contents=contents, config=config,
