@@ -1,243 +1,130 @@
-# Phase 5 & 6: End-to-End Testing + Submission Deliverables
+# Phase 5 & 6: End-to-End Testing & Submission Execution Plan
 
-## Current Status
-
-Your Cloud Run service at `https://al-astoora-agent-1019975245319.us-central1.run.app` is **live and healthy** — the `/health` endpoint returns `200 OK`. All 4 phases of code are deployed. However, the code review found **one critical bug** and several items that need attention before end-to-end testing will actually work.
-
----
-
-## 🔴 CRITICAL BUG: GenAI Fallback Loop in agent.py (Lines 131–182)
-
-> [!CAUTION]
-> The `_execute_agent_turn` function's **fallback path** (path #4, used when ADK `run_async`/`run` methods aren't available) has a broken multi-step tool calling loop. When Gemini requests a tool call (e.g., `validate_document`), the code:
-> 1. ✅ Correctly parses the `function_call` from the response
-> 2. ✅ Correctly executes the tool function
-> 3. ❌ **Never sends the tool result back to the model** — it immediately returns `getattr(response, "text", None)`, which is `None` during a tool call
->
-> **Impact**: If the deployed container is using the fallback path (because `google.adk.Agent` doesn't have a `run_async` or `run` method that works as expected), then every message requiring tool calls — lead capture, document validation, intake status — **will silently fail**. The agent calls the tool but doesn't know the result, so the user gets either no reply or the fallback error message.
-
-### Fix Required
-
-Replace the fallback loop (lines 131–182 in `agent.py`) with a proper multi-turn conversation loop that:
-1. Calls `generate_content` with the user prompt
-2. If the model returns `function_call` parts → execute each tool
-3. Build a `FunctionResponse` with the tool results
-4. Append to conversation history and call `generate_content` again
-5. Repeat until the model produces a text response (no more tool calls)
-6. Return that text response
+**Hackathon Category:** The Taskmaster  
+**Live Service URL:** `https://al-astoora-agent-1019975245319.asia-south1.run.app`  
+**Current Status:** Phases 0–4 Built & Live | 72 Automated Tests Passing | E2E Testing & Final Submission Packaging  
 
 ---
 
-## 🟡 Issue: ADK Agent Import & Compatibility
+## Current System State & Bug Resolutions
 
-> [!WARNING]
-> The code tries `from google.adk import Agent`, then `from google.adk.agents import Agent`, and finally falls back to a dummy class. On Cloud Run, the actual `google-adk>=2.6.0` package is installed, but the `Agent` class may not expose `run_async()` or `run()` methods that match the code's expectations (paths #1–#3 in `_execute_agent_turn`). If none of those paths match, it falls to the broken fallback loop.
->
-> **You need to verify** which path your deployed container actually takes by checking Cloud Run logs.
-
----
-
-## 🟡 Issue: `GEMINI_LOCATION` Mismatch
-
-> [!IMPORTANT]
-> In `config.py`, `GEMINI_LOCATION` defaults to `"global"`. In `.env`, only `GCP_LOCATION=us-central1` is set. The `get_genai_client()` in `validator.py` uses `settings.GEMINI_LOCATION` (which resolves to `"global"`) for Vertex AI initialization. This may cause `400 Bad Request` errors from the Gemini API.
->
-> **Fix**: Either add `GEMINI_LOCATION=us-central1` to the Cloud Run env vars, or change the default in `config.py` to `us-central1`.
+- **Cloud Run Service:** Live and healthy (`/health` returns `{"status": "healthy", "service": "al-astoora-agent", "version": "1.0.0"}`).
+- **Meta WhatsApp Cloud API Webhook:** Verified and operational (`POST /webhook` acknowledges in <50ms).
+- **Tool Calling Multi-Turn Loop:** ✅ **RESOLVED & VERIFIED.** `app/module_b/agent.py` implements an 8-turn tool calling loop in `_execute_agent_turn` that passes function responses back to Gemini 3.7 Flash until a final text response is produced.
+- **`GEMINI_LOCATION` Configuration:** ✅ **VERIFIED.** Configured to `global` for direct Vertex AI access to Gemini 3.7 Flash, with `GCP_LOCATION=asia-south1` for low-latency Firestore operations.
 
 ---
 
-## 🟢 Things That Look Correct
+## Phase 5: End-to-End WhatsApp Test Scenarios
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Module A (Webhook Router) | ✅ Solid | GET/POST `/webhook`, filters, parser, self-reply guard all well-structured |
-| Module A → Module B wiring | ✅ Correct | `register_message_handler(process_message)` in `main.py` |
-| Module B Tools (tools.py) | ✅ Correct | All 10 tools have clear docstrings, simple types, error handling |
-| Module B System Prompt | ✅ Good | Complete identity, services, tool instructions, WhatsApp constraints |
-| Module C (Firestore CRUD) | ✅ Correct | All functions return `{success: bool}` dicts, proper error handling |
-| Module D (Validation) | ✅ Correct | Download → Store → Gemini analysis pipeline, proper boundaries |
-| Dockerfile | ✅ Correct | `python:3.11-slim`, proper build, `PORT=8080` |
-| Cloud Run health | ✅ Verified | Returns `{"status": "healthy"}` |
-| Test suite | ✅ 72 tests | Comprehensive unit/integration coverage |
+The following 7 test scenarios validate the entire autonomous workflow over real WhatsApp:
 
----
-
-## Proposed Changes
-
-### 1. Fix the Critical Bug in agent.py
-
-#### [MODIFY] [agent.py](file:///g:/My%20Drive/Business%20Work/al-astoora-agency/hackathon-2026/Al%20Astoora%20Agent/app/module_b/agent.py)
-
-Replace the fallback `generate_content` block (lines 131–182) with a proper multi-turn tool-calling loop:
-
-```python
-# 4. Direct GenAI model invocation fallback with multi-turn tool loop
-try:
-    from google import genai
-    from google.genai import types
-    from app.module_d.validator import get_genai_client
-
-    client = get_genai_client()
-    settings = get_settings()
-    model_name = settings.GEMINI_MODEL or "gemini-3.7-flash"
-
-    # Build tool declarations for GenAI
-    tool_map = {t.__name__: t for t in ALL_TOOLS}
-
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        temperature=0.2,
-        tools=ALL_TOOLS,
-    )
-
-    # Multi-turn conversation history
-    contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
-
-    MAX_TURNS = 8  # Safety limit to prevent infinite loops
-    for turn in range(MAX_TURNS):
-        if hasattr(client, "aio") and hasattr(client.aio, "models"):
-            response = await client.aio.models.generate_content(
-                model=model_name, contents=contents, config=config,
-            )
-        else:
-            res = client.models.generate_content(
-                model=model_name, contents=contents, config=config,
-            )
-            response = await res if inspect.isawaitable(res) else res
-
-        # Check for function calls
-        candidates = getattr(response, "candidates", [])
-        has_function_calls = False
-        function_responses = []
-
-        if candidates and hasattr(candidates[0], "content") and hasattr(candidates[0].content, "parts"):
-            # Append the model's response to conversation history
-            contents.append(candidates[0].content)
-
-            for part in candidates[0].content.parts:
-                fn_call = getattr(part, "function_call", None)
-                if fn_call:
-                    has_function_calls = True
-                    fn_name = getattr(fn_call, "name", "")
-                    fn_args = dict(getattr(fn_call, "args", {}) or {})
-                    logger.info("Agent tool call [turn %d]: %s(%s)", turn, fn_name, fn_args)
-
-                    # Execute the tool
-                    tool_result = "Tool not found"
-                    if fn_name in tool_map:
-                        target_tool = tool_map[fn_name]
-                        tool_result = target_tool(**fn_args)
-                        if inspect.isawaitable(tool_result):
-                            tool_result = await tool_result
-                        logger.info("Tool %s result: %s", fn_name, str(tool_result)[:200])
-
-                    # Build FunctionResponse
-                    function_responses.append(
-                        types.Part.from_function_response(
-                            name=fn_name,
-                            response={"result": str(tool_result)},
-                        )
-                    )
-
-        if has_function_calls and function_responses:
-            # Append tool results and loop for next model turn
-            contents.append(types.Content(role="user", parts=function_responses))
-            continue
-
-        # No more tool calls — return the text response
-        return getattr(response, "text", None)
-
-    logger.warning("Agent exceeded max %d turns", MAX_TURNS)
-    return None
-except Exception as e:
-    logger.warning("Direct GenAI client turn encountered: %s", e)
-    return None
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      7 END-TO-END VALIDATION SCENARIOS                      │
+│                                                                             │
+│  1. Lead Capture       → User expresses interest; lead captured in DB       │
+│  2. Start Onboarding   → Service selected; required checklist dispatched    │
+│  3. Valid Document     → Valid passport uploaded; instant '✅' confirmation │
+│  4. Defective Document → Blurry/expired file uploaded; '⚠️' fix guidance    │
+│  5. Status Check       → User asks progress; remaining checklist returned   │
+│  6. Intake Completion  → Final document submitted; '🎉' completion flagged │
+│  7. Interactive Booking→ Discovery call slot selected via buttons/lists     │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Fix GEMINI_LOCATION Default
+### Scenario 1: New Prospect Exploration & Lead Capture
+- **User Action:** Sends *"Hi! I need help setting up a business in Singapore."*
+- **Agent Execution:**
+  1. Module A parses message, applies deduplication, and hands off to Module B.
+  2. Module B fires instant WhatsApp typing indicator and read receipt.
+  3. Gemini 3.7 Flash calls `capture_lead(name="User", phone="...", interest="Singapore Company Registration")`.
+  4. Module C records lead in `leads` collection with `status="new"`.
+  5. Agent replies with a warm, 1-2 sentence consultative greeting outlining the Singapore Company Registration process.
+- **Verification:** Query Firestore `leads` collection to confirm new entry.
 
-#### [MODIFY] [config.py](file:///g:/My%20Drive/Business%20Work/al-astoora-agency/hackathon-2026/Al%20Astoora%20Agent/app/config.py)
+### Scenario 2: Onboarding Track Initialization
+- **User Action:** Sends *"Let's proceed with Singapore Company Registration."*
+- **Agent Execution:**
+  1. Agent calls `get_or_create_client(phone="...", name="...", service_type="sg_company_registration")`.
+  2. Module C loads `intake_templates/sg_company_registration`, initializes `clients/{phone}`, and creates 3 subcollection document records (`passport`, `proof_of_address`, `director_resolution`) with status `"pending"`.
+  3. Agent prompts client to upload the first required document (Passport).
+- **Verification:** Check `clients/{phone}` document and `documents` subcollection in Firestore.
 
-Change `GEMINI_LOCATION` default from `"global"` to `"us-central1"` to match the GCP project region.
+### Scenario 3: Valid Document Upload & Instant Verification
+- **User Action:** Uploads a clear, unexpired passport photo.
+- **Agent Execution:**
+  1. Module A extracts `media_id`.
+  2. Module B calls `validate_document(media_id="...", expected_doc_type="auto_detect", client_phone="...")`.
+  3. Module D executes `asyncio.gather`:
+     - Streams file to `gs://al-astoora-documents/clients/{phone}/passport/...`.
+     - Analyzes image with Gemini 3.7 Flash Multimodal Vision on Vertex AI.
+  4. Gemini extracts name, document number, and confirms expiry > current UTC date.
+  5. Module C updates `clients/{phone}/documents/passport` to `"validated"` and logs entry in `document_submissions`.
+  6. Agent replies: *"✅ Thank you! Your Passport has been successfully verified. Next, please upload your Proof of Address (utility bill or bank statement)."*
+- **Verification:** Check GCS bucket file existence and `document_submissions` record.
 
-### 3. Upgrade README.md for Submission
+### Scenario 4: Defective / Blurry / Expired Document Rejection
+- **User Action:** Uploads a blurry document or expired ID.
+- **Agent Execution:**
+  1. Module D runs validation pipeline.
+  2. Gemini 3.7 Flash flags defects: `is_valid = false`, `issues = ["Image blurry", "Expiry date obscured"]`.
+  3. Module C updates document status to `"rejected"` with `rejection_reason`.
+  4. Agent replies: *"⚠️ We noticed an issue with your document: The image is blurry and the expiry date is covered. Please send a clearer, unobstructed photo for us to proceed."*
+- **Verification:** Subcollection document reflects `status="rejected"`.
 
-#### [MODIFY] [README.md](file:///g:/My%20Drive/Business%20Work/al-astoora-agency/hackathon-2026/Al%20Astoora%20Agent/README.md)
+### Scenario 5: Mid-Conversation Status Inquiry
+- **User Action:** Sends *"What documents do you still need from me?"*
+- **Agent Execution:**
+  1. Agent calls `check_intake_status(phone="...")`.
+  2. Module C calculates received (1/3), pending (`proof_of_address`, `director_resolution`), and rejected files.
+  3. Agent replies with a clear, concise status breakdown.
 
-Rewrite to include:
-- Full architecture diagram (polished)
-- All prerequisites listed
-- Step-by-step local setup and Cloud Run deployment
-- Environment variable table
-- Meta webhook configuration steps
-- Tech stack table
-- How to run tests
+### Scenario 6: Full Onboarding Completion
+- **User Action:** Uploads remaining valid documents (`proof_of_address` and signed `director_resolution`).
+- **Agent Execution:**
+  1. Module D validates each upload.
+  2. `update_document_status` detects that `documents_received == documents_required` (3/3).
+  3. Sets `onboarding_status = "complete"` on `clients/{phone}`.
+  4. Agent replies: *"🎉 Congratulations! All required onboarding documents have been received and verified. Our corporate team will now prepare your incorporation filing."*
 
-### 4. Verify with Cloud Run Logs
-
-Before deploying fixes, check the current Cloud Run logs to understand:
-- Which path in `_execute_agent_turn` is actually being taken
-- Whether there are `google.adk` import errors
-- Whether Gemini API calls are failing (GEMINI_LOCATION issue)
-- Whether WhatsApp messages are being received
-
----
-
-## Verification Plan
-
-### Phase 5: End-to-End Testing Sequence
-
-After deploying the bug fix, test these 7 scenarios via real WhatsApp:
-
-| # | Test | Expected Outcome |
-|---|------|-----------------|
-| 1 | Send "Hi" to bot | Bot greets, introduces Al Astoora, asks about services |
-| 2 | Say "I'm interested in SG company registration" | Bot captures lead in Firestore, asks if ready to start |
-| 3 | Confirm to start intake | Bot creates client record, lists 3 required docs (passport, proof_of_address, director_resolution) |
-| 4 | Send a clear passport photo | Gemini validates → bot confirms receipt, shows remaining docs |
-| 5 | Send a blurry/bad photo | Gemini rejects → bot explains what's wrong, asks to resend |
-| 6 | Ask "What do I still need?" | Bot shows intake status with pending/validated/rejected docs |
-| 7 | Ask for appointment | Bot checks slots, presents options, confirms booking |
-
-### Automated Tests
-```bash
-pytest tests/ -v --tb=short
-```
-
-### Manual Cloud Run Log Inspection
-```bash
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=al-astoora-agent" --limit=50 --format=json
-```
-
----
-
-## Phase 6: Submission Deliverables Checklist
-
-| # | Deliverable | Status | Action Needed |
-|---|-------------|--------|---------------|
-| 1 | Category: The Taskmaster | ❌ | Select on Devpost |
-| 2 | Cloud Run URL | ✅ | `https://al-astoora-agent-1019975245319.us-central1.run.app` |
-| 3 | Text Description | ❌ | Write 4-section description (features, tech, data sources, learnings) |
-| 4 | GitHub Repository | ❌ | Push final code, share with `testing@devpost.com` + `cloudhackathons@google.com` |
-| 5 | README with setup instructions | 🟡 | Current README is outdated/minimal — needs major rewrite |
-| 6 | Architecture Diagram | 🟡 | ASCII diagram exists — need polished visual version |
-| 7 | Demo Video (≤4 min, YouTube) | ❌ | Record after E2E testing passes |
-| 8 | Blog Post (+0.2 bonus) | ❌ | Optional — Medium or dev.to post |
-| 9 | Social Media Post (+0.2 bonus) | ❌ | LinkedIn post with #AllThingsAgenticHackathon |
+### Scenario 7: Interactive Consultation Discovery Call Booking
+- **User Action:** Sends *"Can we schedule a call for tomorrow?"*
+- **Agent Execution:**
+  1. Agent calls `send_booking_buttons(recipient_phone="...", date="tomorrow")` or `send_interactive_booking_slots`.
+  2. Module C checks `bookings` for tomorrow and computes open 30-minute slots (e.g. 09:00 AM, 12:00 PM, 03:00 PM).
+  3. Dispatches interactive WhatsApp buttons directly to the user's phone.
+  4. Client taps `"10:00 AM"`.
+  5. Webhook receives button reply `book_2026-08-25_10:00`.
+  6. Agent calls `book_appointment` to atomically confirm booking in Firestore.
+  7. Agent sends confirmation: *"📅 Your discovery consultation is confirmed for Tuesday, August 25, 2026 at 10:00 - 10:30 AM."*
 
 ---
 
-## Recommended Execution Order
+## Phase 6: Submission Deliverables Roadmap
 
-1. **Fix the critical agent.py bug** (multi-turn tool loop)
-2. **Fix GEMINI_LOCATION** default
-3. **Run unit tests** locally to confirm nothing breaks
-4. **Deploy to Cloud Run** with fixes
-5. **Check Cloud Run logs** to verify correct execution path
-6. **Run E2E WhatsApp tests** (7 scenarios above)
-7. **Rewrite README.md** for submission quality
-8. **Generate architecture diagram** (visual, polished)
-9. **Write Devpost text description**
-10. **Record demo video** (≤4 min)
-11. **Submit on Devpost**
-12. *(Optional)* Blog post + LinkedIn post for bonus points
+| # | Deliverable | Format / Platform | Action Checklist |
+|---|---|---|---|
+| 1 | **Category Selection** | Devpost | Select **The Taskmaster** |
+| 2 | **Hosted Project URL** | Cloud Run | `https://al-astoora-agent-1019975245319.asia-south1.run.app` |
+| 3 | **Text Description** | Devpost Markdown | Features, Tech Stack, Data Sources, Findings & Learnings |
+| 4 | **Code Repository** | GitHub | Public repo with commit history (or share with `testing@devpost.com` & `cloudhackathons@google.com`) |
+| 5 | **README.md** | GitHub Markdown | Step-by-step setup, environment variables, local testing, Cloud Run deployment |
+| 6 | **Architecture Diagram** | PNG / SVG / Mermaid | Visual flow: WhatsApp ↔ Cloud Run ↔ Gemini 3.7 Flash ↔ Firestore / GCS |
+| 7 | **Demo Video (≤ 4 Min)** | YouTube (Public) | Screen recording of WhatsApp live demo + Cloud Console metrics + Vertex AI logs |
+| 8 | **Technical Blog Post** | Medium / dev.to | Optional bonus (+0.2 points) |
+| 9 | **LinkedIn Post** | LinkedIn | Optional bonus (+0.2 points) with `#AllThingsAgenticHackathon` |
+
+---
+
+## Advantages of the E2E Testing Architecture
+
+1. **Deterministic Verification:** 72 unit tests validate every failure mode offline, while the 7 live WhatsApp scenarios verify production transport and multimodal reasoning.
+2. **Automated Audit Telemetry:** Every test upload creates a permanent record in Firestore `document_submissions`, providing real-time verification proof for hackathon judging.
+
+---
+
+## Operational Limitations
+
+1. **Single Testing Device:** Testing must be conducted via the single production WhatsApp Business Number ID (`BOT_PHONE_NUMBER=919289581053`).
+2. **Video Time Constraint:** The 4-minute maximum video limit requires crisp demonstration pacing across lead capture, validation, and booking.
