@@ -197,7 +197,13 @@ async def update_document_status(
     try:
         db = get_firestore_client()
         client_ref = db.collection(CLIENTS_COLLECTION).document(phone)
-        client_snap = await client_ref.get()
+        doc_ref = client_ref.collection(DOCUMENTS_SUBCOLLECTION).document(doc_type)
+
+        # Parallelize client and document snapshot reads
+        client_snap, doc_snap = await asyncio.gather(
+            client_ref.get(),
+            doc_ref.get(),
+        )
 
         if not client_snap.exists:
             if not auto_create_client:
@@ -220,9 +226,6 @@ async def update_document_status(
             client_data = init_client_data
         else:
             client_data = client_snap.to_dict() or {}
-
-        doc_ref = client_ref.collection(DOCUMENTS_SUBCOLLECTION).document(doc_type)
-        doc_snap = await doc_ref.get()
 
         # Calculate attempts
         current_attempts = 0
@@ -377,4 +380,27 @@ async def list_documents(phone: str) -> Dict[str, Any]:
             "success": False,
             "error": f"Database unavailable: {str(e)}",
         }
+
+
+async def get_all_submissions(limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Retrieves all document submissions across all clients for the dashboard audit trail.
+    """
+    try:
+        db = get_firestore_client()
+        submissions_stream = (
+            db.collection(DOCUMENT_SUBMISSIONS_COLLECTION)
+            .order_by("submitted_at", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        results = []
+        async for doc in submissions_stream:
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            results.append(data)
+        return results
+    except Exception as e:
+        logger.warning("Failed to fetch all submissions: %s", e)
+        return []
 

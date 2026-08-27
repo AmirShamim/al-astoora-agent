@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.module_a.router import router as webhook_router, register_message_handler
 from app.module_b.agent import process_message
+from app.dashboard.router import router as dashboard_router
 
 # Configure structured logging
 settings = get_settings()
@@ -58,8 +59,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
 # Mount Webhook Router (Module A)
 app.include_router(webhook_router)
+
+# Mount Dashboard & Client Portal (Module E)
+app.include_router(dashboard_router)
+
+# Optionally mount React built static assets if present
+frontend_assets_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist" / "assets"
+if frontend_assets_dir.exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_assets_dir)), name="assets")
 
 
 @app.get("/health", tags=["Health"], summary="Service Health Check")

@@ -196,3 +196,78 @@ async def upload_to_storage(
             "error": str(e),
             "file_url": None,
         }
+
+
+def generate_signed_url(
+    file_url_or_blob_name: str,
+    expiration_minutes: int = 60,
+) -> Optional[str]:
+    """
+    Generates a secure, time-limited signed HTTPS URL (v4) for opening or previewing
+    a private GCS document/image directly in a web browser or dashboard.
+    Accepts either a full 'gs://bucket/blob_path' URI or relative 'blob_path'.
+    """
+    if not file_url_or_blob_name:
+        return None
+
+    settings = get_settings()
+    bucket_name = settings.GCS_BUCKET_NAME
+    blob_name = file_url_or_blob_name
+
+    if file_url_or_blob_name.startswith("gs://"):
+        parts = file_url_or_blob_name[5:].split("/", 1)
+        if len(parts) == 2:
+            bucket_name, blob_name = parts[0], parts[1]
+        elif len(parts) == 1:
+            bucket_name = parts[0]
+            blob_name = ""
+
+    try:
+        from datetime import timedelta
+        client = get_storage_client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(minutes=expiration_minutes),
+            method="GET",
+        )
+        return signed_url
+    except Exception as e:
+        logger.warning("Could not generate signed URL for %s: %s", file_url_or_blob_name, e)
+        return None
+
+
+async def download_blob_bytes(file_url_or_blob_name: str) -> Optional[tuple[bytes, str]]:
+    """
+    Downloads raw binary bytes and content type from GCS for direct HTTP streaming.
+    Returns (bytes, content_type) or None.
+    """
+    if not file_url_or_blob_name:
+        return None
+
+    settings = get_settings()
+    bucket_name = settings.GCS_BUCKET_NAME
+    blob_name = file_url_or_blob_name
+
+    if file_url_or_blob_name.startswith("gs://"):
+        parts = file_url_or_blob_name[5:].split("/", 1)
+        if len(parts) == 2:
+            bucket_name, blob_name = parts[0], parts[1]
+
+    def _sync_download():
+        client = get_storage_client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            return None
+        content = blob.download_as_bytes()
+        mime_type = blob.content_type or "application/octet-stream"
+        return content, mime_type
+
+    try:
+        return await asyncio.to_thread(_sync_download)
+    except Exception as e:
+        logger.error("Failed to download blob %s from GCS: %s", file_url_or_blob_name, e)
+        return None

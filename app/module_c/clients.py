@@ -127,8 +127,9 @@ async def get_or_create_client(
         }
         await client_ref.set(client_data)
 
-        # Initialize document entries under subcollection
+        # Initialize document entries under subcollection in a single batched write
         created_documents = []
+        batch = db.batch()
         for doc_type in required_docs:
             doc_entry = {
                 "doc_type": doc_type,
@@ -139,10 +140,13 @@ async def get_or_create_client(
                 "validated_at": None,
                 "attempts": 0,
             }
-            await client_ref.collection(DOCUMENTS_SUBCOLLECTION).document(doc_type).set(doc_entry)
+            doc_ref = client_ref.collection(DOCUMENTS_SUBCOLLECTION).document(doc_type)
+            batch.set(doc_ref, doc_entry)
             created_documents.append(doc_entry)
 
-        logger.info("New client created for phone %s with %d required documents", phone, len(required_docs))
+        await batch.commit()
+
+        logger.info("New client created for phone %s with %d required documents (batched write)", phone, len(required_docs))
         return {
             "success": True,
             "is_new": True,
@@ -262,3 +266,28 @@ async def get_client(phone: str) -> Dict[str, Any]:
             "success": False,
             "error": f"Database unavailable: {str(e)}",
         }
+
+
+async def get_all_clients(limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Retrieves all client onboarding profiles with their document checklists for the dashboard.
+    """
+    try:
+        db = get_firestore_client()
+        clients_stream = db.collection(CLIENTS_COLLECTION).limit(limit).stream()
+        results = []
+        async for doc in clients_stream:
+            client_data = doc.to_dict() or {}
+            phone = doc.id
+            client_data["phone"] = phone
+
+            # Fetch subcollection documents
+            docs_stream = doc.reference.collection(DOCUMENTS_SUBCOLLECTION).stream()
+            docs_list = [d.to_dict() async for d in docs_stream]
+            client_data["documents"] = docs_list
+            results.append(client_data)
+
+        return results
+    except Exception as e:
+        logger.warning("Failed to fetch all clients: %s", e)
+        return []

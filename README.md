@@ -76,6 +76,14 @@ Al Astoora Agent/
 ├── implementation_plan.md          # Architectural plan & technical contracts
 ├── e2e-testing-and-submission-plan.md  # Testing scenarios & submission checklist
 │
+├── frontend/                       # React 18 + Vite + Tailwind CSS Client Dashboard
+│   ├── src/
+│   │   ├── components/             # Leads, Clients, Submissions, Bookings, Transcripts tabs
+│   │   ├── api/                    # REST API client bindings to backend endpoints
+│   │   └── types/                  # TypeScript interfaces and data schemas
+│   ├── package.json                # Frontend dependencies & build scripts
+│   └── vite.config.ts              # Vite bundle configuration
+│
 ├── app/
 │   ├── __init__.py
 │   ├── main.py                     # FastAPI application entry point, /health, router mount
@@ -177,18 +185,20 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 | Variable | Description | Default / Example |
 |---|---|---|
-| `WHATSAPP_TOKEN` | Permanent Meta System User Token | `EAAStEGDo...` |
-| `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp Business Phone Number ID | `1113443245192571` |
-| `BOT_PHONE_NUMBER` | Bot Phone Number (Self-reply filter) | `919289581053` |
-| `WEBHOOK_VERIFY_TOKEN` | Meta Webhook Verification Token | `al_astoora_secure_verify_token_2026` |
+| `WHATSAPP_TOKEN` | Permanent Meta System User Token | `<your_meta_token>` |
+| `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp Business Phone Number ID | `<your_phone_id>` |
+| `BOT_PHONE_NUMBER` | Bot Phone Number (Self-reply filter) | `<your_bot_phone>` |
+| `WEBHOOK_VERIFY_TOKEN` | Meta Webhook Verification Token | `<your_verify_token>` |
 | `GRAPH_API_VERSION` | Meta Graph API Version | `v26.0` |
-| `GCP_PROJECT_ID` | Google Cloud Project ID | `project-080b5971-eb4b-4d2b-a4c` |
+| `GCP_PROJECT_ID` | Google Cloud Project ID | `<your_gcp_project_id>` |
 | `GCP_LOCATION` | Regional location for Firestore / Compute | `asia-south1` |
 | `GEMINI_LOCATION` | Vertex AI regional endpoint for Gemini 3.7 | `global` |
 | `GCS_BUCKET_NAME` | Cloud Storage Bucket Name | `al-astoora-documents` |
 | `GEMINI_MODEL` | Gemini Model Identifier | `gemini-3.7-flash` |
 | `GEMINI_THINKING_LEVEL` | Thinking level for perception latency | `low` |
 | `GEMINI_THINKING_BUDGET`| Thinking token budget (0 = minimal latency)| `0` |
+| `GOOGLE_CALENDAR_ID` | Optional Google Calendar ID for booking sync | `<optional_calendar_id>` |
+| `DEFAULT_TIMEZONE` | Timezone for consultations & calendar events | `Asia/Singapore` |
 | `APP_ENV` | Environment Identifier | `production` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 | `PORT` | Server listening port | `8080` |
@@ -206,8 +216,8 @@ gcloud run deploy al-astoora-agent \
   --source . \
   --region asia-south1 \
   --allow-unauthenticated \
-  --service-account ai-agent-n8n@project-080b5971-eb4b-4d2b-a4c.iam.gserviceaccount.com \
-  --set-env-vars "WHATSAPP_TOKEN=<token>,WHATSAPP_PHONE_NUMBER_ID=1113443245192571,BOT_PHONE_NUMBER=919289581053,WEBHOOK_VERIFY_TOKEN=al_astoora_secure_verify_token_2026,GCP_PROJECT_ID=project-080b5971-eb4b-4d2b-a4c,GEMINI_MODEL=gemini-3.7-flash,GEMINI_LOCATION=global"
+  --service-account <your-service-account>@<your-project-id>.iam.gserviceaccount.com \
+  --env-vars-file .env
 ```
 
 ---

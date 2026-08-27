@@ -23,10 +23,19 @@ wheels/
 .installed.cfg
 *.egg
 
+# Node & Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm/
+
 # Environment & Secrets
 .env
 *.json
 !project-*.json.example
+!frontend/package*.json
+!frontend/tsconfig*.json
+!tests/sample_payloads/*.json
 
 # Testing & Coverage
 .pytest_cache/

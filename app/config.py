@@ -17,15 +17,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Meta WhatsApp Cloud API
-    WHATSAPP_TOKEN: str = "EAAStEGDoJOYBR6eSp1ZAu8IxU86MbIQX6SkHOY5SDQtNvUaph2yUFtCZAgiz0ZBZCn2r7japgrLSMEps2QcU1S2lNerokp1RZBzpFXxP3zA2b34jJz7lwVezhE60TZCEZAsWmXdtguJKwo4e5j6kyqr1kjTgRZCvWZC05IdHm8EqYhxSHMcsktK8wFJuNvi0bgBa34wZDZD"
-    WHATSAPP_PHONE_NUMBER_ID: str = "1113443245192571"
-    BOT_PHONE_NUMBER: str = "919289581053"
-    WEBHOOK_VERIFY_TOKEN: str = "al_astoora_secure_verify_token_2026"
+    # Meta WhatsApp Cloud API (Loaded from .env)
+    WHATSAPP_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    BOT_PHONE_NUMBER: str = ""
+    WEBHOOK_VERIFY_TOKEN: str = ""
     GRAPH_API_VERSION: str = "v26.0"
 
-    # Google Cloud Platform
-    GCP_PROJECT_ID: str = "project-080b5971-eb4b-4d2b-a4c"
+    # Google Cloud Platform (Loaded from .env)
+    GCP_PROJECT_ID: str = ""
     GCP_LOCATION: str = "asia-south1"
     GCS_BUCKET_NAME: str = "al-astoora-documents"
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     GEMINI_LOCATION: str = "global"     # "global" required for Gemini 3.6 / 3.x models on Vertex AI
     GEMINI_THINKING_LEVEL: str = "low"  # "low" or "off" for fast WhatsApp perception
     GEMINI_THINKING_BUDGET: int = 0     # 0 tokens for no-thinking / minimal latency
+
+    # Google Calendar Integration (Optional Sync)
+    GOOGLE_CALENDAR_ID: Optional[str] = None
+    DEFAULT_TIMEZONE: str = "Asia/Singapore"
 
     # App Environment
     APP_ENV: str = "production"

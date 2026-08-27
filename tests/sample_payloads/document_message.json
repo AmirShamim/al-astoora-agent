@@ -1,0 +1,42 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100000000000001",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550001111",
+              "phone_number_id": "123456789012345"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Ahmed Al-Rashid"
+                },
+                "wa_id": "6591234567"
+              }
+            ],
+            "messages": [
+              {
+                "from": "6591234567",
+                "id": "wamid.HBgMNjU5MTIzNDU2NxUCABEYEjA4RTg2RTNFREI5RDAyQzI3MwE=",
+                "timestamp": "1723456830",
+                "type": "document",
+                "document": {
+                  "filename": "Director_Resolution_Signed.pdf",
+                  "mime_type": "application/pdf",
+                  "sha256": "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFV=",
+                  "id": "media_doc_1122334455"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

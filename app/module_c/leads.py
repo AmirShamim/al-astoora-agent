@@ -111,3 +111,26 @@ async def get_lead_by_phone(phone: str) -> Dict[str, Any]:
             "success": False,
             "error": f"Database unavailable: {str(e)}",
         }
+
+
+async def get_all_leads(limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Retrieves all captured prospective leads for the dashboard lead pipeline.
+    """
+    try:
+        db = get_firestore_client()
+        leads_stream = (
+            db.collection(LEADS_COLLECTION)
+            .order_by("captured_at", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        results = []
+        async for doc in leads_stream:
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            results.append(data)
+        return results
+    except Exception as e:
+        logger.warning("Failed to fetch all leads: %s", e)
+        return []

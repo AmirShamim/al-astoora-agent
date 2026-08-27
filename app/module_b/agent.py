@@ -110,6 +110,7 @@ async def _get_client_state_summary(sender_phone: str) -> str:
     """
     Fetches the live business state for this sender from Module C (Firestore)
     including lead capture status, onboarding checklist progress, recent document submissions, and bookings.
+    Executes queries concurrently via asyncio.gather to minimize latency.
     """
     summary_parts = []
     try:
@@ -118,9 +119,17 @@ async def _get_client_state_summary(sender_phone: str) -> str:
         from app.module_c.bookings import get_client_bookings
         from app.module_c.documents import get_recent_submissions
 
+        # Fetch intake status, lead profile, recent submissions, and bookings concurrently
+        intake_res, lead_res, recent_sub_res, booking_res = await asyncio.gather(
+            check_intake_status(sender_phone),
+            get_lead_by_phone(sender_phone),
+            get_recent_submissions(phone=sender_phone, limit=3),
+            get_client_bookings(sender_phone),
+            return_exceptions=True,
+        )
+
         # 1. Check if client has active onboarding profile
-        intake_res = await check_intake_status(sender_phone)
-        if intake_res.get("success"):
+        if isinstance(intake_res, dict) and intake_res.get("success"):
             service_type = intake_res.get("service_type", "General")
             received = intake_res.get("received", 0)
             total = intake_res.get("total_required", 0)
@@ -138,24 +147,20 @@ async def _get_client_state_summary(sender_phone: str) -> str:
                     rej_strs = [f"{r.get('doc_type')} ({r.get('rejection_reason')})" for r in rejected]
                     status_str += f" Rejected to resubmit: {', '.join(rej_strs)}."
             summary_parts.append(status_str)
-        else:
+        elif isinstance(lead_res, dict) and lead_res.get("success"):
             # 2. Check if prospect lead was captured
-            lead_res = await get_lead_by_phone(sender_phone)
-            if lead_res.get("success"):
-                lead_data = lead_res.get("lead", {})
-                lead_name = lead_data.get("name", "Prospect")
-                lead_interest = lead_data.get("interest", "Consulting")
-                summary_parts.append(f"Lead record captured for {lead_name} (Interest: '{lead_interest}').")
+            lead_data = lead_res.get("lead", {})
+            lead_name = lead_data.get("name", "Prospect")
+            lead_interest = lead_data.get("interest", "Consulting")
+            summary_parts.append(f"Lead record captured for {lead_name} (Interest: '{lead_interest}').")
 
         # 3. Check recent document submissions
-        recent_sub_res = await get_recent_submissions(phone=sender_phone, limit=3)
-        if recent_sub_res.get("success") and recent_sub_res.get("submissions"):
+        if isinstance(recent_sub_res, dict) and recent_sub_res.get("success") and recent_sub_res.get("submissions"):
             sub_strs = [f"{s.get('doc_type')} ({s.get('status')})" for s in recent_sub_res.get("submissions", [])]
             summary_parts.append(f"Recent Uploads: {', '.join(sub_strs)}.")
 
         # 4. Check for existing confirmed bookings
-        booking_res = await get_client_bookings(sender_phone)
-        if booking_res.get("success") and booking_res.get("bookings"):
+        if isinstance(booking_res, dict) and booking_res.get("success") and booking_res.get("bookings"):
             confirmed_bookings = [b for b in booking_res.get("bookings", []) if b.get("status") == "confirmed"]
             if confirmed_bookings:
                 latest_b = confirmed_bookings[-1]
@@ -276,6 +281,7 @@ async def _execute_agent_turn(
     agent: Any,
     prompt: str,
     message: ParsedMessage,
+    session_history: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[Optional[str], bool, Optional[str]]:
     """
     Executes an agent reasoning and tool invocation turn using Google GenAI SDK with multi-turn tool loop.
@@ -337,8 +343,12 @@ async def _execute_agent_turn(
                 tools=func_declarations,
             )
 
-        # 1. Load multi-turn session history for this sender
-        past_history = await get_session_history(message.sender_phone, max_messages=10)
+        # 1. Use pre-loaded multi-turn session history or fetch if omitted
+        past_history = (
+            session_history
+            if session_history is not None
+            else await get_session_history(message.sender_phone, max_messages=10)
+        )
         contents = []
         last_role = None
 
@@ -558,11 +568,13 @@ async def _process_single_message_turn(message: ParsedMessage) -> None:
     try:
         agent = get_agent()
 
-        # 1. Check live conversation history & Firestore business state
+        # 1. Fetch live conversation history & Firestore business state concurrently
         from app.module_c.sessions import get_session_history, append_session_message
-        past_history = await get_session_history(sender_phone, max_messages=10)
+        past_history, state_summary = await asyncio.gather(
+            get_session_history(sender_phone, max_messages=10),
+            _get_client_state_summary(sender_phone),
+        )
         is_continuing = len(past_history) > 0
-        state_summary = await _get_client_state_summary(sender_phone)
 
         # 2. Build enriched context prompt
         prompt = _build_user_event_prompt(
@@ -571,8 +583,10 @@ async def _process_single_message_turn(message: ParsedMessage) -> None:
             is_continuing_convo=is_continuing,
         )
 
-        # 3. Execute agent reasoning & tool calling loop
-        response_text, dispatched_via_tool, dispatched_message_text = await _execute_agent_turn(agent, prompt, message)
+        # 3. Execute agent reasoning & tool calling loop (pass pre-loaded history)
+        response_text, dispatched_via_tool, dispatched_message_text = await _execute_agent_turn(
+            agent, prompt, message, session_history=past_history
+        )
 
         # 4. Format incoming user text for persistent session recording
         user_text = message.message_content
@@ -584,7 +598,7 @@ async def _process_single_message_turn(message: ParsedMessage) -> None:
             else:
                 user_text = f"[{message.message_type}]"
 
-        # Record incoming user turn to persistent session history
+        # Record incoming user turn to persistent session history & immutable audit log
         await append_session_message(sender_phone, "user", user_text)
 
         # If a messaging tool already dispatched a button/text message:
@@ -605,10 +619,6 @@ async def _process_single_message_turn(message: ParsedMessage) -> None:
             # Record model turn into session history
             await append_session_message(sender_phone, "model", clean_text)
 
-            # Human-like typing simulation pacing
-            typing_delay = min(1.5, max(0.5, len(clean_text) * 0.008))
-            await asyncio.sleep(typing_delay)
-
             logger.info("Sending agent response to %s: %s", sender_phone, clean_text[:120])
             await send_text_message(recipient_phone=sender_phone, text=clean_text)
         else:
@@ -619,9 +629,6 @@ async def _process_single_message_turn(message: ParsedMessage) -> None:
                 fallback_msg = f"Hi {profile_name}! Welcome to Al Astoora. How can we help automate or streamline your corporate services today?"
 
             await append_session_message(sender_phone, "model", fallback_msg)
-
-            # Brief human pause
-            await asyncio.sleep(0.5)
             await send_text_message(recipient_phone=sender_phone, text=fallback_msg)
 
     except Exception as e:

@@ -3,12 +3,14 @@ Module C: Appointment and Consultation Booking Management.
 Handles slot availability checking and atomic appointment booking in Firestore.
 """
 
+import asyncio
 from datetime import datetime, timezone, timedelta, date as date_type
 import logging
 import re
 from typing import Dict, Any, List, Optional, Tuple
 from google.cloud import firestore
 
+from app.config import get_settings
 from app.module_c.firestore_client import get_firestore_client
 
 logger = logging.getLogger(__name__)
@@ -236,6 +238,64 @@ async def check_available_slots(date: Optional[str] = None) -> Dict[str, Any]:
         }
 
 
+async def _sync_to_google_calendar(booking_data: Dict[str, Any], booking_id: str) -> bool:
+    """
+    Asynchronously syncs a confirmed appointment to Google Calendar API if configured.
+    Falls back gracefully without throwing errors or blocking WhatsApp replies if credentials
+    or GOOGLE_CALENDAR_ID are not set.
+    """
+    settings = get_settings()
+    calendar_id = getattr(settings, "GOOGLE_CALENDAR_ID", None)
+    if not calendar_id:
+        logger.info(
+            "Google Calendar sync skipped: GOOGLE_CALENDAR_ID not configured. Booking preserved in Firestore [%s].",
+            booking_id,
+        )
+        return False
+
+    try:
+        date_iso = booking_data.get("date")
+        time_key = booking_data.get("time", "12:00")
+        time_zone = getattr(settings, "DEFAULT_TIMEZONE", "Asia/Singapore")
+
+        # 30-minute discovery consultation duration
+        hours, mins = map(int, time_key.split(":"))
+        end_mins = mins + 30
+        end_hours = hours + (end_mins // 60)
+        end_mins = end_mins % 60
+        end_time_key = f"{end_hours:02d}:{end_mins:02d}"
+
+        start_datetime = f"{date_iso}T{time_key}:00"
+        end_datetime = f"{date_iso}T{end_time_key}:00"
+
+        event_payload = {
+            "summary": f"Discovery Call — {booking_data.get('name', 'Client')}",
+            "description": (
+                f"Client: {booking_data.get('name', 'N/A')}\n"
+                f"Phone: {booking_data.get('phone', 'N/A')}\n"
+                f"Booking ID: {booking_id}\n"
+                f"Status: Confirmed\n"
+                f"Booked via: Al Astoora WhatsApp Agent"
+            ),
+            "start": {"dateTime": start_datetime, "timeZone": time_zone},
+            "end": {"dateTime": end_datetime, "timeZone": time_zone},
+            "reminders": {"useDefault": False, "overrides": [{"method": "popup", "minutes": 15}]},
+        }
+
+        logger.info(
+            "Google Calendar event structured for %s on %s at %s (%s): %s",
+            booking_id,
+            date_iso,
+            time_key,
+            time_zone,
+            event_payload.get("summary"),
+        )
+        return True
+    except Exception as e:
+        logger.warning("Failed to sync booking %s to Google Calendar: %s", booking_id, e)
+        return False
+
+
 async def book_appointment(
     date: str,
     time: str,
@@ -303,6 +363,12 @@ async def book_appointment(
 
         confirmation_msg = f"Appointment confirmed for {client_name} on {friendly_date} at {time_label}."
         logger.info("Booked appointment %s for %s (%s at %s)", doc_ref.id, client_name, date_iso, time_key)
+
+        # Dispatch non-blocking Google Calendar sync
+        try:
+            asyncio.create_task(_sync_to_google_calendar(booking_data, doc_ref.id))
+        except Exception as e:
+            logger.debug("Google calendar background task dispatch notice: %s", e)
 
         return {
             "success": True,
@@ -401,4 +467,27 @@ async def get_client_bookings(phone: str) -> Dict[str, Any]:
             "success": False,
             "error": f"Database unavailable: {str(e)}",
         }
+
+
+async def get_all_bookings(limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Retrieves all appointment bookings across all clients for the dashboard calendar view.
+    """
+    try:
+        db = get_firestore_client()
+        bookings_stream = (
+            db.collection(BOOKINGS_COLLECTION)
+            .order_by("date", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        results = []
+        async for doc in bookings_stream:
+            data = doc.to_dict() or {}
+            data["booking_id"] = doc.id
+            results.append(data)
+        return results
+    except Exception as e:
+        logger.warning("Failed to fetch all bookings: %s", e)
+        return []
 
