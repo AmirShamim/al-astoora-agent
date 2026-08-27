@@ -35,6 +35,8 @@ frontend/dist/
 !project-*.json.example
 !frontend/package*.json
 !frontend/tsconfig*.json
+!frontend/vercel*.json
+!vercel*.json
 !tests/sample_payloads/*.json
 
 # Testing & Coverage

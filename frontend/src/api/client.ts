@@ -1,6 +1,6 @@
 import { DashboardStats, Lead, ClientProfile, DocumentSubmission, Booking, TranscriptResponse } from '../types/dashboard';
 
-const API_BASE = '';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
 export async function fetchStats(): Promise<DashboardStats> {
   const res = await fetch(`${API_BASE}/api/dashboard/stats`);
