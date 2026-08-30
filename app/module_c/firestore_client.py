@@ -22,8 +22,9 @@ def get_firestore_client() -> firestore.AsyncClient:
     global _async_db
     if _async_db is None:
         settings = get_settings()
-        logger.info("Initializing Firestore AsyncClient for project: %s", settings.GCP_PROJECT_ID)
-        _async_db = firestore.AsyncClient(project=settings.GCP_PROJECT_ID)
+        proj = settings.GCP_PROJECT_ID.strip() if settings.GCP_PROJECT_ID else None
+        logger.info("Initializing Firestore AsyncClient for project: %s", proj or "(auto-detected)")
+        _async_db = firestore.AsyncClient(project=proj)
     return _async_db
 
 

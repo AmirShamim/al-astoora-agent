@@ -1,7 +1,7 @@
-.gcloudignore
-.dockerignore
 .git
 .gitignore
+.gcloudignore
+.dockerignore
 .env
 .venv
 env/
@@ -12,8 +12,6 @@ __pycache__/
 .pytest_cache/
 *.md
 frontend/
-frontend/node_modules/
-frontend/dist/
 node_modules/
 dist/
 build/

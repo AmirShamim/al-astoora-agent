@@ -39,8 +39,9 @@ def get_storage_client() -> storage.Client:
     global _storage_client
     if _storage_client is None:
         settings = get_settings()
-        logger.info("Initializing Google Cloud Storage Client for project: %s", settings.GCP_PROJECT_ID)
-        _storage_client = storage.Client(project=settings.GCP_PROJECT_ID)
+        proj = settings.GCP_PROJECT_ID.strip() if settings.GCP_PROJECT_ID else None
+        logger.info("Initializing Google Cloud Storage Client for project: %s", proj or "(auto-detected)")
+        _storage_client = storage.Client(project=proj)
     return _storage_client
 
 
