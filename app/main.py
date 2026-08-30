@@ -70,9 +70,12 @@ app.include_router(webhook_router)
 app.include_router(dashboard_router)
 
 # Optionally mount React built static assets if present
-frontend_assets_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist" / "assets"
-if frontend_assets_dir.exists():
-    app.mount("/assets", StaticFiles(directory=str(frontend_assets_dir)), name="assets")
+try:
+    frontend_assets_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist" / "assets"
+    if frontend_assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(frontend_assets_dir)), name="assets")
+except Exception as exc:
+    logger.warning("Could not mount static assets directory: %s", exc)
 
 
 @app.get("/health", tags=["Health"], summary="Service Health Check")

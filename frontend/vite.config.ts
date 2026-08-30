@@ -19,8 +19,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'https://al-astoora-agent-1019975245319.asia-south1.run.app',
         changeOrigin: true,
+        secure: true,
       },
     },
   },
