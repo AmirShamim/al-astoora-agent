@@ -4,68 +4,63 @@
 
 @layer base {
   :root {
-    color-scheme: dark;
+    color-scheme: light;
   }
   
   body {
-    @apply bg-[#0B0F19] text-slate-100 font-sans min-h-screen overflow-x-hidden;
-    background-image: 
-      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(16, 185, 129, 0.06) 0px, transparent 50%),
-      radial-gradient(at 50% 100%, rgba(139, 92, 246, 0.05) 0px, transparent 50%);
-    background-attachment: fixed;
+    @apply bg-slate-50 text-slate-900 font-sans min-h-screen overflow-x-hidden antialiased;
   }
 }
 
 @layer components {
-  .glass-card {
-    @apply bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 shadow-xl shadow-black/20 rounded-2xl transition-all duration-300;
+  .card {
+    @apply bg-white border border-slate-200/90 shadow-sm rounded-xl transition-all duration-200;
   }
   
-  .glass-card-hover {
-    @apply glass-card hover:border-slate-700/80 hover:bg-slate-900/80 hover:shadow-2xl hover:shadow-brand-500/5 hover:-translate-y-0.5;
+  .card-hover {
+    @apply card hover:border-slate-300 hover:shadow;
   }
 
-  .glass-input {
-    @apply bg-slate-950/60 border border-slate-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-slate-100 rounded-xl px-4 py-2 text-sm placeholder:text-slate-500 transition-all outline-none;
+  .input-field {
+    @apply bg-white border border-slate-200 focus:border-slate-900 focus:ring-1 focus:ring-slate-900 text-slate-900 rounded-lg px-3 py-1.5 text-xs sm:text-sm placeholder:text-slate-400 transition-colors outline-none;
   }
 
   .badge-emerald {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20;
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200;
   }
 
   .badge-brand {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-brand-500/10 text-brand-400 border border-brand-500/20;
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200;
   }
 
   .badge-amber {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20;
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200;
   }
 
   .badge-rose {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20;
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200;
   }
 
   .badge-slate {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800/60 text-slate-300 border border-slate-700/50;
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200;
   }
 }
 
-/* Custom Scrollbars */
+/* Crisp Clean Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: #f8fafc;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.6);
-  border-radius: 9999px;
+  background: #cbd5e1;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.4);
+  background: #94a3b8;
 }

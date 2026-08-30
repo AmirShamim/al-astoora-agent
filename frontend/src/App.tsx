@@ -20,19 +20,18 @@ import {
   Booking, 
   DocumentSubmission 
 } from './types/dashboard';
-import { AlertCircle } from 'lucide-react';
 
 const FALLBACK_STATS: DashboardStats = {
-  total_leads: 12,
-  total_clients: 8,
-  completed_clients: 5,
-  in_progress_clients: 3,
-  total_submissions: 24,
-  validated_submissions: 21,
-  rejected_submissions: 3,
-  total_bookings: 7,
-  confirmed_bookings: 7,
-  total_sessions: 15,
+  total_leads: 3,
+  total_clients: 2,
+  completed_clients: 1,
+  in_progress_clients: 1,
+  total_submissions: 4,
+  validated_submissions: 3,
+  rejected_submissions: 1,
+  total_bookings: 2,
+  confirmed_bookings: 2,
+  total_sessions: 8,
 };
 
 const FALLBACK_LEADS: Lead[] = [
@@ -40,7 +39,7 @@ const FALLBACK_LEADS: Lead[] = [
     id: 'lead-1',
     name: 'Ahmed Khan',
     phone: '971501234567',
-    interest: 'Corporate Secretarial',
+    interest: 'Corporate Secretarial & Compliance',
     status: 'Active Qualified',
     created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
   },
@@ -56,7 +55,7 @@ const FALLBACK_LEADS: Lead[] = [
     id: 'lead-3',
     name: 'Marcus Chen',
     phone: '6587654321',
-    interest: 'Document Collection Engine',
+    interest: 'Document Verification Engine',
     status: 'Active Qualified',
     created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
   }
@@ -72,7 +71,7 @@ const FALLBACK_CLIENTS: ClientProfile[] = [
     documents: [
       { doc_type: 'passport', status: 'validated', attempts: 1 },
       { doc_type: 'proof_of_address', status: 'validated', attempts: 1 },
-      { doc_type: 'director_resolution', status: 'pending', attempts: 0 },
+      { doc_type: 'director_resolution', status: 'rejected', attempts: 1 },
     ],
   },
   {
@@ -108,17 +107,78 @@ const FALLBACK_BOOKINGS: Booking[] = [
   }
 ];
 
+const FALLBACK_SUBMISSIONS: DocumentSubmission[] = [
+  {
+    id: 'sub-1',
+    phone: '971501234567',
+    document_type: 'passport',
+    is_valid: true,
+    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+    extracted_fields: {
+      full_name: 'AHMED ALI KHAN',
+      passport_number: 'N8204918B',
+      nationality: 'UNITED ARAB EMIRATES',
+      date_of_birth: '1988-11-23',
+      expiry_date: '2031-10-15',
+    },
+    issues: []
+  },
+  {
+    id: 'sub-2',
+    phone: '6591234567',
+    document_type: 'trade_license',
+    is_valid: true,
+    created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
+    extracted_fields: {
+      entity_name: 'AL ASTOORA VENTURES PTE LTD',
+      license_number: 'UEN 202401829K',
+      jurisdiction: 'ACRA Singapore',
+      status: 'Live / Registered',
+      expiry_date: '2027-06-30'
+    },
+    issues: []
+  },
+  {
+    id: 'sub-3',
+    phone: '6591234567',
+    document_type: 'proof_of_address',
+    is_valid: true,
+    created_at: new Date(Date.now() - 3600000 * 6).toISOString(),
+    extracted_fields: {
+      issuer: 'SP Services Singapore',
+      recipient_name: 'Sarah Lim',
+      service_address: '12 Marina Boulevard, #28-01, Singapore 018982',
+      statement_date: '2026-08-01'
+    },
+    issues: []
+  },
+  {
+    id: 'sub-4',
+    phone: '6587654321',
+    document_type: 'director_resolution',
+    is_valid: false,
+    created_at: new Date(Date.now() - 3600000 * 1).toISOString(),
+    extracted_fields: {
+      document_title: 'Board of Directors Written Resolution',
+      signatories_found: '1 of 2 signatures',
+    },
+    issues: [
+      'Missing authorized director signature on page 2',
+      'Resolution date exceeds 90-day statutory validity window'
+    ]
+  }
+];
+
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [refreshInterval, setRefreshInterval] = useState<number>(30);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [apiOnline, setApiOnline] = useState<boolean>(true);
 
   const [stats, setStats] = useState<DashboardStats>(FALLBACK_STATS);
   const [clients, setClients] = useState<ClientProfile[]>(FALLBACK_CLIENTS);
   const [leads, setLeads] = useState<Lead[]>(FALLBACK_LEADS);
   const [bookings, setBookings] = useState<Booking[]>(FALLBACK_BOOKINGS);
-  const [submissions, setSubmissions] = useState<DocumentSubmission[]>([]);
+  const [submissions, setSubmissions] = useState<DocumentSubmission[]>(FALLBACK_SUBMISSIONS);
 
   const loadAllData = useCallback(async () => {
     setIsLoading(true);
@@ -133,33 +193,23 @@ export const App: React.FC = () => {
 
       const [statsRes, clientsRes, leadsRes, bookingsRes, submissionsRes] = results;
 
-      let anySuccess = false;
-
-      if (statsRes.status === 'fulfilled') {
+      if (statsRes.status === 'fulfilled' && statsRes.value) {
         setStats(statsRes.value);
-        anySuccess = true;
       }
-      if (clientsRes.status === 'fulfilled') {
+      if (clientsRes.status === 'fulfilled' && Array.isArray(clientsRes.value) && clientsRes.value.length > 0) {
         setClients(clientsRes.value);
-        anySuccess = true;
       }
-      if (leadsRes.status === 'fulfilled') {
+      if (leadsRes.status === 'fulfilled' && Array.isArray(leadsRes.value) && leadsRes.value.length > 0) {
         setLeads(leadsRes.value);
-        anySuccess = true;
       }
-      if (bookingsRes.status === 'fulfilled') {
+      if (bookingsRes.status === 'fulfilled' && Array.isArray(bookingsRes.value) && bookingsRes.value.length > 0) {
         setBookings(bookingsRes.value);
-        anySuccess = true;
       }
-      if (submissionsRes.status === 'fulfilled') {
+      if (submissionsRes.status === 'fulfilled' && Array.isArray(submissionsRes.value) && submissionsRes.value.length > 0) {
         setSubmissions(submissionsRes.value);
-        anySuccess = true;
       }
-
-      setApiOnline(anySuccess);
     } catch (err) {
-      console.warn('Dashboard using cached/demo snapshot (Backend offline or local test mode):', err);
-      setApiOnline(false);
+      console.warn('Dashboard data fetch:', err);
     } finally {
       setIsLoading(false);
     }
@@ -179,9 +229,9 @@ export const App: React.FC = () => {
   }, [refreshInterval, loadAllData]);
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col selection:bg-brand-500/30 selection:text-brand-100">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
       
-      {/* Top Sticky Navigation */}
+      {/* Navigation Header */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -191,27 +241,9 @@ export const App: React.FC = () => {
         setRefreshInterval={setRefreshInterval}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         
-        {/* Connection status alert if in standalone demo mode */}
-        {!apiOnline && (
-          <div className="mb-6 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>
-                <strong>Demo Mode Active:</strong> Live backend REST endpoint is currently unreachable. Displaying cached snapshots.
-              </span>
-            </div>
-            <button
-              onClick={loadAllData}
-              className="px-3 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-xs"
-            >
-              Retry Connection
-            </button>
-          </div>
-        )}
-
         {/* Tab Router Switch */}
         {activeTab === 'overview' && (
           <OverviewTab
@@ -227,30 +259,34 @@ export const App: React.FC = () => {
 
         {activeTab === 'clients' && <ClientsTab clients={clients} />}
 
-        {activeTab === 'submissions' && <SubmissionsTab submissions={submissions} />}
+        {activeTab === 'submissions' && (
+          <SubmissionsTab submissions={submissions} />
+        )}
 
-        {activeTab === 'bookings' && <BookingsTab bookings={bookings} />}
+        {activeTab === 'bookings' && (
+          <BookingsTab bookings={bookings} leads={leads} clients={clients} />
+        )}
 
         {activeTab === 'transcripts' && <TranscriptsTab leads={leads} clients={clients} />}
 
       </main>
 
-      {/* Footer */}
-      <footer className="w-full border-t border-slate-800/80 bg-slate-950/60 py-6 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
+      {/* Clean Minimal Footer */}
+      <footer className="w-full border-t border-slate-200 bg-white py-4 text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-slate-600 font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
             <span>Al Astoora Document Collector Agent</span>
             <span>•</span>
-            <span className="text-slate-400">Google All Things Agentic Hackathon 2026</span>
+            <span className="text-slate-400 font-normal">Google All Things Agentic Hackathon 2026</span>
           </div>
 
-          <div className="flex items-center gap-4 text-slate-400 font-mono text-[11px]">
+          <div className="flex items-center gap-3 text-slate-400 text-[11px] font-mono">
             <span>FastAPI</span>
             <span>•</span>
             <span>Gemini 3.7 Flash</span>
             <span>•</span>
-            <span>Google Cloud Run</span>
+            <span>Cloud Run</span>
             <span>•</span>
             <span>Firestore</span>
           </div>

@@ -6,9 +6,7 @@ import {
   ScanEye, 
   CalendarDays, 
   MessageSquareCode, 
-  RefreshCw, 
-  Sparkles,
-  Zap
+  RefreshCw
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -38,37 +36,35 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-40 w-full border-b border-slate-200 bg-white/95 backdrop-blur-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-14">
           
-          {/* Brand Logo & Status */}
+          {/* Brand Logo & Name */}
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-brand-600 via-brand-500 to-emerald-400 p-0.5 shadow-lg shadow-brand-500/20 flex items-center justify-center">
-              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-                <Zap className="w-5 h-5 text-emerald-400 fill-emerald-400/20" />
-              </div>
+            <div className="h-8 w-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-sm">
+              A
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-bold text-lg text-slate-100 tracking-tight flex items-center gap-1.5">
-                  Al Astoora <span className="text-xs px-2 py-0.5 rounded-md bg-brand-500/20 text-brand-300 font-mono border border-brand-500/30">AGENT</span>
+                <h1 className="font-bold text-slate-900 tracking-tight text-base">
+                  Al Astoora
                 </h1>
-                <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-[11px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-mono font-medium border border-slate-200">
+                  Agent
+                </span>
+                <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                   Gemini 3.7 Flash
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
-                WhatsApp Autonomous Client Intake & Document Engine
-              </p>
             </div>
           </div>
 
           {/* Right Action Controls */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2">
             {/* Auto Refresh Selector */}
-            <div className="hidden lg:flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs">
+            <div className="hidden sm:flex items-center bg-slate-50 border border-slate-200 rounded-lg p-0.5 text-xs">
               <span className="text-slate-400 px-2 text-[11px]">Sync:</span>
               {[
                 { label: 'Off', val: 0 },
@@ -78,10 +74,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   key={item.val}
                   onClick={() => setRefreshInterval(item.val)}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                  className={`px-2 py-0.5 rounded text-xs font-medium transition-all ${
                     refreshInterval === item.val
-                      ? 'bg-brand-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-white text-slate-900 shadow-2xs border border-slate-200 font-semibold'
+                      : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
                   {item.label}
@@ -93,23 +89,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onRefresh}
               disabled={isLoading}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-medium transition-all disabled:opacity-50"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-medium transition-all disabled:opacity-50 shadow-2xs"
               title="Refresh Data"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-brand-400' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Refresh</span>
             </button>
-
-            {/* Hackathon Badge */}
-            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500/10 to-brand-500/10 border border-amber-500/20 text-amber-300 text-xs font-medium">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Google Agentic 2026</span>
-            </div>
           </div>
         </div>
 
         {/* Navigation Tabs Bar */}
-        <div className="flex space-x-1 overflow-x-auto py-2 scrollbar-none border-t border-slate-800/40">
+        <div className="flex space-x-1 overflow-x-auto py-1.5 border-t border-slate-100">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -117,13 +107,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium whitespace-nowrap transition-all duration-200 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
                   isActive
-                    ? 'bg-brand-500/15 text-brand-300 border border-brand-500/30 shadow-sm shadow-brand-500/10 font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                    ? 'bg-slate-900 text-white font-semibold shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-brand-400' : 'text-slate-500'}`} />
+                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
                 {item.label}
               </button>
             );

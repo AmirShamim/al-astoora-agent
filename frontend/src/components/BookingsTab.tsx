@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   CalendarDays, 
   Search, 
@@ -6,146 +6,912 @@ import {
   CheckCircle2, 
   Calendar as CalendarIcon,
   ExternalLink,
-  MessageCircle
+  MessageCircle,
+  Copy,
+  Check,
+  Edit3,
+  X,
+  List,
+  LayoutGrid,
+  CalendarRange,
+  Phone,
+  CheckCheck
 } from 'lucide-react';
-import { Booking } from '../types/dashboard';
+import { Booking, Lead, ClientProfile } from '../types/dashboard';
 
 interface BookingsTabProps {
   bookings: Booking[];
+  leads?: Lead[];
+  clients?: ClientProfile[];
 }
 
-export const BookingsTab: React.FC<BookingsTabProps> = ({ bookings }) => {
+interface BookingOverride {
+  name?: string;
+  status?: string;
+  notes?: string;
+}
+
+export const BookingsTab: React.FC<BookingsTabProps> = ({ 
+  bookings = [], 
+  leads = [], 
+  clients = [] 
+}) => {
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'upcoming' | 'today' | 'completed'>('all');
+  const [viewMode, setViewMode] = useState<'cards' | 'timeline' | 'table'>('cards');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, BookingOverride>>({});
 
-  const filteredBookings = bookings.filter((b) => {
-    return (
-      (b.name?.toLowerCase() || '').includes(search.toLowerCase()) ||
-      b.phone.includes(search) ||
-      b.date.includes(search) ||
-      b.time.includes(search)
-    );
-  });
+  // Clean phone number formatting (e.g. 917011190158 -> +91 70111 90158)
+  const formatPhoneNumber = (phoneStr: string): string => {
+    if (!phoneStr) return '';
+    const clean = phoneStr.replace(/[^0-9]/g, '');
+    if (clean.length === 12 && clean.startsWith('91')) {
+      return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
+    }
+    if (clean.length === 12 && clean.startsWith('971')) {
+      return `+971 ${clean.slice(3, 5)} ${clean.slice(5, 8)} ${clean.slice(8)}`;
+    }
+    if (clean.length === 10 && clean.startsWith('65')) {
+      return `+65 ${clean.slice(2, 6)} ${clean.slice(6)}`;
+    }
+    if (clean.length === 10) {
+      return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
+    }
+    return phoneStr.startsWith('+') ? phoneStr : `+${phoneStr}`;
+  };
 
+  // Resolves a human name rather than placeholders like "Valued Client" or "..."
+  const resolveClientName = (booking: Booking): { displayName: string; hasRealName: boolean; formattedPhone: string } => {
+    const bookingId = booking.id || `${booking.phone}-${booking.date}-${booking.time}`;
+    if (overrides[bookingId]?.name) {
+      return {
+        displayName: overrides[bookingId].name!,
+        hasRealName: true,
+        formattedPhone: formatPhoneNumber(booking.phone)
+      };
+    }
+
+    const phone = (booking.phone || '').trim();
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    const rawName = (booking.name || '').trim();
+    
+    const isPlaceholder = 
+      !rawName || 
+      rawName === '...' || 
+      rawName.toLowerCase().includes('valued client') || 
+      rawName.toLowerCase() === 'client' ||
+      rawName.toLowerCase() === 'anonymous prospect';
+
+    if (!isPlaceholder) {
+      return { 
+        displayName: rawName, 
+        hasRealName: true, 
+        formattedPhone: formatPhoneNumber(phone) 
+      };
+    }
+
+    // Try finding in CRM Leads
+    const matchingLead = leads.find((l) => l.phone.replace(/[^0-9]/g, '') === cleanPhone);
+    if (matchingLead?.name && matchingLead.name !== '...' && !matchingLead.name.toLowerCase().includes('valued client')) {
+      return { 
+        displayName: matchingLead.name, 
+        hasRealName: true, 
+        formattedPhone: formatPhoneNumber(phone) 
+      };
+    }
+
+    // Try finding in Client Profiles
+    const matchingClient = clients.find((c) => c.phone.replace(/[^0-9]/g, '') === cleanPhone);
+    if (matchingClient?.name && matchingClient.name !== '...' && !matchingClient.name.toLowerCase().includes('valued client')) {
+      return { 
+        displayName: matchingClient.name, 
+        hasRealName: true, 
+        formattedPhone: formatPhoneNumber(phone) 
+      };
+    }
+
+    // Default to clean phone number representation
+    const formatted = formatPhoneNumber(phone);
+    return { 
+      displayName: formatted || 'WhatsApp Client', 
+      hasRealName: false, 
+      formattedPhone: formatted 
+    };
+  };
+
+  // Converts 24-hr time '14:00' to user-friendly IST string '02:00 PM IST (02:00 - 02:30 PM)'
+  const formatTimeIST = (timeStr: string, compact = false): string => {
+    if (!timeStr) return 'TBD IST';
+    const parts = timeStr.split(':');
+    if (parts.length >= 2) {
+      const hours = parseInt(parts[0], 10);
+      const mins = parseInt(parts[1], 10);
+      if (!isNaN(hours) && !isNaN(mins)) {
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const h12 = hours % 12 || 12;
+        const formattedH = h12 < 10 ? `0${h12}` : `${h12}`;
+        const formattedM = mins < 10 ? `0${mins}` : `${mins}`;
+
+        if (compact) {
+          return `${formattedH}:${formattedM} ${ampm} IST`;
+        }
+
+        const endMinsTotal = hours * 60 + mins + 30;
+        const endHours = Math.floor(endMinsTotal / 60) % 24;
+        const endMins = endMinsTotal % 60;
+        const endAmpm = endHours >= 12 ? 'PM' : 'AM';
+        const endH12 = endHours % 12 || 12;
+        const endFormattedH = endH12 < 10 ? `0${endH12}` : `${endH12}`;
+        const endFormattedM = endMins < 10 ? `0${endMins}` : `${endMins}`;
+
+        return `${formattedH}:${formattedM} ${ampm} IST (${formattedH}:${formattedM} – ${endFormattedH}:${endFormattedM} ${endAmpm})`;
+      }
+    }
+    return `${timeStr} IST`;
+  };
+
+  // Converts date '2026-08-28' to 'Fri, 28 Aug 2026'
+  const formatDateIST = (dateStr: string): string => {
+    if (!dateStr) return 'Scheduled Date';
+    try {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        const dayName = dt.toLocaleDateString('en-IN', { weekday: 'short' });
+        const monthName = dt.toLocaleDateString('en-IN', { month: 'short' });
+        return `${dayName}, ${d} ${monthName} ${y}`;
+      }
+      const dt = new Date(dateStr);
+      if (!isNaN(dt.getTime())) {
+        return dt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      }
+    } catch {}
+    return dateStr;
+  };
+
+  // Checks whether the booking's scheduled IST slot has already occurred
+  const isBookingInPast = (dateStr: string, timeStr?: string): boolean => {
+    if (!dateStr) return false;
+    const nowMs = Date.now();
+
+    try {
+      let year = 0, month = 0, day = 0;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        const parts = dateStr.split('-').map(Number);
+        year = parts[0];
+        month = parts[1] - 1;
+        day = parts[2];
+      } else {
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+          year = d.getFullYear();
+          month = d.getMonth();
+          day = d.getDate();
+        } else {
+          return false;
+        }
+      }
+
+      let hours = 23, minutes = 59;
+      if (timeStr && timeStr.includes(':')) {
+        const [h, m] = timeStr.split(':').map(Number);
+        if (!isNaN(h) && !isNaN(m)) {
+          hours = h;
+          minutes = m;
+        }
+      }
+
+      // Slot end time is 30 mins after start time
+      const slotEndMinutesTotal = hours * 60 + minutes + 30;
+      const slotEndH = Math.floor(slotEndMinutesTotal / 60);
+      const slotEndM = slotEndMinutesTotal % 60;
+
+      // IST is UTC + 5:30 (330 minutes)
+      const istOffsetMs = 5.5 * 60 * 60 * 1000;
+      const slotUtcMs = Date.UTC(year, month, day, slotEndH, slotEndM) - istOffsetMs;
+
+      return nowMs >= slotUtcMs;
+    } catch {
+      return false;
+    }
+  };
+
+  // Automatically resolves status: past appointments become "Completed"
+  const getEffectiveStatus = (booking: Booking, bookingId: string) => {
+    const manualOverride = overrides[bookingId]?.status;
+    if (manualOverride) {
+      if (manualOverride.toLowerCase() === 'completed') {
+        return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
+      }
+      if (manualOverride.toLowerCase() === 'cancelled') {
+        return { label: 'Cancelled', isPast: true, badgeClass: 'badge-rose' };
+      }
+      if (manualOverride.toLowerCase() === 'rescheduled') {
+        return { label: 'Rescheduled', isPast: false, badgeClass: 'badge-amber' };
+      }
+      if (manualOverride.toLowerCase() === 'confirmed') {
+        const inPast = isBookingInPast(booking.date, booking.time);
+        if (inPast) return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
+        return { label: 'Confirmed', isPast: false, badgeClass: 'badge-emerald' };
+      }
+      return { label: manualOverride, isPast: false, badgeClass: 'badge-slate' };
+    }
+
+    const rawStatus = (booking.status || 'confirmed').toLowerCase();
+    if (rawStatus === 'cancelled') {
+      return { label: 'Cancelled', isPast: true, badgeClass: 'badge-rose' };
+    }
+    if (rawStatus === 'rescheduled') {
+      return { label: 'Rescheduled', isPast: false, badgeClass: 'badge-amber' };
+    }
+    if (rawStatus === 'completed') {
+      return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
+    }
+
+    // Automatically check if the slot has already occurred
+    const inPast = isBookingInPast(booking.date, booking.time);
+    if (inPast) {
+      return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
+    }
+
+    return { label: 'Confirmed', isPast: false, badgeClass: 'badge-emerald' };
+  };
+
+  // Categorize appointment status relative to IST current date
+  const getTimelineCategory = (dateStr: string, timeStr?: string) => {
+    const inPast = isBookingInPast(dateStr, timeStr);
+    if (inPast) return 'completed';
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (dateStr === todayStr) return 'today';
+    return 'upcoming';
+  };
+
+  // Generate Google Calendar Link strictly with IST (+05:30 offset)
   const generateGCalUrl = (b: Booking) => {
-    const title = encodeURIComponent(`Al Astoora Discovery Consultation — ${b.name || b.phone}`);
-    const details = encodeURIComponent(`Client: ${b.name || 'Prospect'}\nPhone: ${b.phone}\nBooked automatically via Al Astoora WhatsApp AI Agent`);
-    const cleanDate = b.date.replace(/[^0-9]/g, '');
-    const cleanTime = b.time.replace(/[^0-9]/g, '').padEnd(4, '0');
-    const startIso = `${cleanDate}T${cleanTime}00Z`;
+    const { displayName } = resolveClientName(b);
+    const title = encodeURIComponent(`Al Astoora Consultation — ${displayName}`);
+    const details = encodeURIComponent(
+      `Al Astoora Discovery Consultation\n` +
+      `Client: ${displayName}\n` +
+      `Phone: ${formatPhoneNumber(b.phone)}\n` +
+      `Timezone: Indian Standard Time (IST, UTC+05:30)\n` +
+      `Slot: ${formatTimeIST(b.time)}\n` +
+      `Booked via WhatsApp Autonomous Agent`
+    );
+    const cleanDate = (b.date || '').replace(/[^0-9]/g, '');
+    const cleanTime = (b.time || '').replace(/[^0-9]/g, '').padEnd(4, '0');
+    const startIso = `${cleanDate || '20260901'}T${cleanTime || '120000'}Z`;
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${startIso}/${startIso}`;
   };
+
+  // Pre-filled WhatsApp message in IST
+  const getWhatsAppMessageUrl = (b: Booking, isCompleted: boolean) => {
+    const { displayName } = resolveClientName(b);
+    const cleanPhone = (b.phone || '').replace(/[^0-9]/g, '');
+    const formattedDate = formatDateIST(b.date);
+    const formattedTime = formatTimeIST(b.time, true);
+    
+    let messageText = '';
+    if (isCompleted) {
+      messageText = 
+        `Hello ${displayName},\n\n` +
+        `Thank you for participating in our scheduled consultation on *${formattedDate}* at *${formattedTime}*.\n\n` +
+        `Please let us know if you need any follow-up documents or assistance.\n\n` +
+        `Best regards,\nAl Astoora Client Team`;
+    } else {
+      messageText = 
+        `Hello ${displayName},\n\n` +
+        `This is a reminder for your upcoming consultation with Al Astoora on *${formattedDate}* at *${formattedTime}*.\n\n` +
+        `Please let us know if you need to reschedule or have any questions.\n\n` +
+        `Best regards,\nAl Astoora Client Team`;
+    }
+
+    return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`;
+  };
+
+  // Copy appointment summary to clipboard
+  const handleCopyDetails = (b: Booking, id: string, statusLabel: string) => {
+    const { displayName, formattedPhone } = resolveClientName(b);
+    const text = 
+      `📋 Consultation Details (Al Astoora)\n` +
+      `• Client: ${displayName}\n` +
+      `• Phone: ${formattedPhone}\n` +
+      `• Date: ${formatDateIST(b.date)}\n` +
+      `• Time: ${formatTimeIST(b.time)}\n` +
+      `• Status: ${statusLabel}`;
+    
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // Filter & Sort Bookings
+  const filteredBookings = useMemo(() => {
+    return bookings
+      .filter((b) => {
+        if (!b) return false;
+        const bId = b.id || `${b.phone}-${b.date}-${b.time}`;
+        const { displayName, formattedPhone } = resolveClientName(b);
+        const { isPast } = getEffectiveStatus(b, bId);
+        const date = b.date || '';
+        const time = b.time || '';
+        
+        const matchesSearch =
+          displayName.toLowerCase().includes(search.toLowerCase()) ||
+          formattedPhone.includes(search) ||
+          b.phone.includes(search) ||
+          date.includes(search) ||
+          time.includes(search);
+
+        const category = getTimelineCategory(date, time);
+        const matchesFilter =
+          statusFilter === 'all' ||
+          (statusFilter === 'upcoming' && category === 'upcoming') ||
+          (statusFilter === 'today' && category === 'today') ||
+          (statusFilter === 'completed' && isPast);
+
+        return matchesSearch && matchesFilter;
+      })
+      .sort((a, b) => {
+        const dateA = `${a.date || ''} ${a.time || ''}`;
+        const dateB = `${b.date || ''} ${b.time || ''}`;
+        return dateB.localeCompare(dateA);
+      });
+  }, [bookings, search, statusFilter, overrides, leads, clients]);
+
+  // Group by Date for Timeline View
+  const groupedByDate = useMemo(() => {
+    const groups: Record<string, Booking[]> = {};
+    filteredBookings.forEach((b) => {
+      const d = b.date || 'Unscheduled';
+      if (!groups[d]) groups[d] = [];
+      groups[d].push(b);
+    });
+    return groups;
+  }, [filteredBookings]);
+
+  // Metrics
+  const upcomingCount = bookings.filter((b) => !isBookingInPast(b.date || '', b.time)).length;
+  const completedCount = bookings.filter((b) => isBookingInPast(b.date || '', b.time)).length;
+  const uniquePhones = new Set(bookings.map((b) => b.phone)).size;
 
   return (
     <div className="space-y-6 animate-fade-in">
       
-      {/* Header */}
-      <div className="glass-card p-6 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <CalendarDays className="w-5 h-5 text-amber-400" />
-            <span>Discovery Consultations & Bookings</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Appointments booked autonomously over WhatsApp with collision prevention via <code className="text-brand-300">book_appointment</code>.
-          </p>
-        </div>
-
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Search booking or client..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="glass-input pl-9 w-64 text-xs"
-          />
-        </div>
-      </div>
-
-      {/* Bookings Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredBookings.length > 0 ? (
-          filteredBookings.map((booking, idx) => (
-            <div
-              key={booking.id || idx}
-              className="glass-card p-6 border border-slate-800 flex flex-col justify-between hover:border-slate-700 transition-all"
-            >
-              <div>
-                
-                {/* Header */}
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      <CalendarIcon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-base text-slate-100">
-                        {booking.name || 'Discovery Consultation'}
-                      </h3>
-                      <p className="text-xs font-mono text-slate-400 mt-0.5">{booking.phone}</p>
-                    </div>
-                  </div>
-
-                  <span className="badge-emerald">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    {booking.status || 'Confirmed'}
-                  </span>
-                </div>
-
-                {/* Time Details Banner */}
-                <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 mb-4 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400 flex items-center gap-1.5">
-                      <CalendarIcon className="w-3.5 h-3.5 text-brand-400" />
-                      Date:
-                    </span>
-                    <span className="text-slate-100 font-semibold">{booking.date}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      Time:
-                    </span>
-                    <span className="text-slate-100 font-semibold">{booking.time}</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                <a
-                  href={`https://wa.me/${booking.phone.replace(/[^0-9]/g, '')}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-medium transition-colors"
-                >
-                  <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>WhatsApp</span>
-                </a>
-
-                <a
-                  href={generateGCalUrl(booking)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-600/20 hover:bg-brand-600/30 text-brand-300 border border-brand-500/30 text-xs font-semibold transition-all"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Add to GCal</span>
-                </a>
-              </div>
-
+      {/* Header with Metrics Overview */}
+      <div className="card p-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <CalendarDays className="w-5 h-5 text-slate-700" />
+                <span>Consultations & Bookings</span>
+              </h2>
+              <span className="badge-brand font-mono text-[11px]">
+                IST (UTC+05:30)
+              </span>
             </div>
-          ))
-        ) : (
-          <div className="col-span-full glass-card p-12 text-center text-slate-500">
-            <CalendarDays className="w-12 h-12 mx-auto mb-3 opacity-40 text-slate-400" />
-            <p className="text-sm font-medium text-slate-300">No appointments scheduled yet.</p>
-            <p className="text-xs text-slate-500 mt-1">Bookings confirmed via WhatsApp interactive buttons will appear here.</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Real-time appointment schedule with conflict-free WhatsApp slot reservation via <code className="font-mono text-slate-700 font-medium">book_appointment</code>.
+            </p>
           </div>
-        )}
+
+          {/* Quick Metrics Chips */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex items-center gap-2">
+              <span className="text-slate-500">Total Bookings:</span>
+              <span className="font-bold text-slate-900">{bookings.length}</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs flex items-center gap-2 text-emerald-800">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span>Upcoming:</span>
+              <span className="font-bold text-emerald-900">{upcomingCount}</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-xs flex items-center gap-2 text-slate-700">
+              <CheckCheck className="w-3.5 h-3.5 text-slate-500" />
+              <span>Completed:</span>
+              <span className="font-bold text-slate-900">{completedCount}</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex items-center gap-2">
+              <span className="text-slate-500">Unique Clients:</span>
+              <span className="font-bold text-slate-900">{uniquePhones}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Controls Bar: Filters, Search, and View Switcher */}
+        <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          
+          {/* Status Filter Pills */}
+          <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs">
+            <button
+              onClick={() => setStatusFilter('all')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                statusFilter === 'all' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              All ({bookings.length})
+            </button>
+            <button
+              onClick={() => setStatusFilter('upcoming')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                statusFilter === 'upcoming' ? 'bg-white text-emerald-700 shadow-2xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Upcoming ({upcomingCount})
+            </button>
+            <button
+              onClick={() => setStatusFilter('completed')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                statusFilter === 'completed' ? 'bg-white text-slate-900 shadow-2xs font-semibold' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Completed ({completedCount})
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+              <input
+                type="text"
+                placeholder="Search name, phone, date, slot..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field pl-8 w-56 text-xs"
+              />
+            </div>
+
+            {/* View Switcher */}
+            <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs">
+              <button
+                onClick={() => setViewMode('cards')}
+                className={`p-1.5 rounded transition-all ${
+                  viewMode === 'cards' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
+                }`}
+                title="Grid Cards View"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setViewMode('timeline')}
+                className={`p-1.5 rounded transition-all ${
+                  viewMode === 'timeline' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
+                }`}
+                title="Agenda / Timeline View"
+              >
+                <CalendarRange className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`p-1.5 rounded transition-all ${
+                  viewMode === 'table' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
+                }`}
+                title="Table View"
+              >
+                <List className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Main View Display */}
+      {filteredBookings.length > 0 ? (
+        <>
+          {/* 1. CARDS GRID VIEW */}
+          {viewMode === 'cards' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredBookings.map((booking, idx) => {
+                const bookingId = booking.id || `${booking.phone}-${booking.date}-${booking.time}-${idx}`;
+                const { displayName, hasRealName, formattedPhone } = resolveClientName(booking);
+                const { label: statusLabel, isPast, badgeClass } = getEffectiveStatus(booking, bookingId);
+
+                return (
+                  <div
+                    key={bookingId}
+                    className="card p-4 flex flex-col justify-between hover:border-slate-300 transition-all group"
+                  >
+                    <div>
+                      {/* Card Header: Client & Status */}
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                            {hasRealName ? displayName[0].toUpperCase() : <Phone className="w-3.5 h-3.5 text-slate-500" />}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <h3 className="font-semibold text-sm text-slate-900 leading-snug">
+                                {displayName}
+                              </h3>
+                              <button
+                                onClick={() => setSelectedBooking(booking)}
+                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-700 transition-opacity p-0.5"
+                                title="Edit Name / Notes"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <p className="text-xs font-mono text-slate-500 mt-0.5">
+                              {formattedPhone}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-end gap-1">
+                          <span className={badgeClass}>
+                            {isPast ? <CheckCheck className="w-3 h-3 text-slate-500" /> : <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                            {statusLabel}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* IST Date & Time Schedule Box */}
+                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 mb-3 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-500 flex items-center gap-1.5">
+                            <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
+                            Date:
+                          </span>
+                          <span className="text-slate-900 font-semibold">
+                            {formatDateIST(booking.date)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-500 flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            Slot Time (IST):
+                          </span>
+                          <span className="text-slate-900 font-semibold font-mono text-[11px]">
+                            {formatTimeIST(booking.time)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Notes if any */}
+                      {overrides[bookingId]?.notes && (
+                        <div className="mb-3 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                          <span className="font-semibold">Note:</span> {overrides[bookingId].notes}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Bar */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1">
+                        {/* WhatsApp Action */}
+                        <a
+                          href={getWhatsAppMessageUrl(booking, isPast)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-medium transition-colors"
+                          title={isPast ? 'Send follow-up message on WhatsApp' : 'Send appointment reminder on WhatsApp'}
+                        >
+                          <MessageCircle className="w-3 h-3 text-emerald-600" />
+                          <span>{isPast ? 'Follow-up' : 'Reminder'}</span>
+                        </a>
+
+                        {/* Copy Details */}
+                        <button
+                          onClick={() => handleCopyDetails(booking, bookingId, statusLabel)}
+                          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors border border-transparent hover:border-slate-200"
+                          title="Copy Consultation Details"
+                        >
+                          {copiedId === bookingId ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Google Calendar / Manage Action */}
+                      {!isPast ? (
+                        <a
+                          href={generateGCalUrl(booking)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium transition-colors shadow-2xs"
+                          title="Add event to Google Calendar in Indian Standard Time"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Add to GCal</span>
+                        </a>
+                      ) : (
+                        <button
+                          onClick={() => setSelectedBooking(booking)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium transition-colors"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Manage</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 2. TIMELINE / AGENDA VIEW */}
+          {viewMode === 'timeline' && (
+            <div className="space-y-4">
+              {Object.entries(groupedByDate).map(([dateKey, dateBookings]) => {
+                const isGroupPast = isBookingInPast(dateKey);
+                return (
+                  <div key={dateKey} className="card p-5">
+                    <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 rounded-md bg-slate-100 text-slate-700">
+                          <CalendarIcon className="w-4 h-4" />
+                        </div>
+                        <h3 className="font-bold text-sm text-slate-900">
+                          {formatDateIST(dateKey)}
+                        </h3>
+                        <span className={isGroupPast ? 'badge-slate text-[11px]' : 'badge-emerald text-[11px]'}>
+                          {isGroupPast ? 'Concluded' : 'Active'}
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-400 font-mono">
+                        {dateBookings.length} {dateBookings.length === 1 ? 'Slot' : 'Slots'}
+                      </span>
+                    </div>
+
+                    <div className="divide-y divide-slate-100">
+                      {dateBookings.map((b, idx) => {
+                        const bId = b.id || `${b.phone}-${b.date}-${b.time}-${idx}`;
+                        const { displayName, formattedPhone } = resolveClientName(b);
+                        const { label: statusLabel, isPast, badgeClass } = getEffectiveStatus(b, bId);
+
+                        return (
+                          <div key={bId} className="py-3 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className={`px-2.5 py-1 rounded-md font-mono text-xs font-medium whitespace-nowrap ${
+                                isPast ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'bg-slate-900 text-white'
+                              }`}>
+                                {formatTimeIST(b.time, true)}
+                              </div>
+                              <div>
+                                <h4 className="font-semibold text-xs text-slate-900">{displayName}</h4>
+                                <p className="font-mono text-[11px] text-slate-500">{formattedPhone}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className={badgeClass}>
+                                {isPast ? <CheckCheck className="w-3 h-3 text-slate-500" /> : <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                                {statusLabel}
+                              </span>
+                              <a
+                                href={getWhatsAppMessageUrl(b, isPast)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-medium"
+                              >
+                                <MessageCircle className="w-3 h-3 text-emerald-600" />
+                                <span>{isPast ? 'Follow-up' : 'Reminder'}</span>
+                              </a>
+                              {!isPast && (
+                                <a
+                                  href={generateGCalUrl(b)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>GCal</span>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 3. TABLE VIEW */}
+          {viewMode === 'table' && (
+            <div className="card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
+                    <tr>
+                      <th className="px-5 py-3">Client Contact</th>
+                      <th className="px-5 py-3">Phone</th>
+                      <th className="px-5 py-3">Date (IST)</th>
+                      <th className="px-5 py-3">Slot Time (IST)</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredBookings.map((b, idx) => {
+                      const bId = b.id || `${b.phone}-${b.date}-${b.time}-${idx}`;
+                      const { displayName, formattedPhone } = resolveClientName(b);
+                      const { label: statusLabel, isPast, badgeClass } = getEffectiveStatus(b, bId);
+
+                      return (
+                        <tr key={bId} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="px-5 py-3 font-medium text-slate-900">
+                            {displayName}
+                          </td>
+                          <td className="px-5 py-3 font-mono text-slate-600">
+                            {formattedPhone}
+                          </td>
+                          <td className="px-5 py-3 font-medium text-slate-900">
+                            {formatDateIST(b.date)}
+                          </td>
+                          <td className="px-5 py-3 font-mono text-slate-800">
+                            {formatTimeIST(b.time, true)}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className={badgeClass}>
+                              {isPast ? <CheckCheck className="w-3 h-3 text-slate-500" /> : <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                              {statusLabel}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <a
+                                href={getWhatsAppMessageUrl(b, isPast)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="p-1 rounded text-emerald-700 hover:bg-emerald-50"
+                                title={isPast ? 'WhatsApp Follow-up' : 'WhatsApp Reminder'}
+                              >
+                                <MessageCircle className="w-4 h-4" />
+                              </a>
+                              {!isPast && (
+                                <a
+                                  href={generateGCalUrl(b)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1 rounded text-slate-700 hover:bg-slate-100"
+                                  title="Add to Google Calendar"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                </a>
+                              )}
+                              <button
+                                onClick={() => setSelectedBooking(b)}
+                                className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                                title="Edit / Notes"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="card p-10 text-center text-slate-500">
+          <CalendarDays className="w-8 h-8 mx-auto mb-2 text-slate-400" />
+          <p className="text-sm font-medium text-slate-700">No consultation appointments found for this filter.</p>
+          <p className="text-xs text-slate-400 mt-0.5">Appointments booked via WhatsApp interactive slots will appear here automatically.</p>
+        </div>
+      )}
+
+      {/* Edit / Manage Booking Modal */}
+      {selectedBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="relative w-full max-w-md bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden p-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="w-4 h-4 text-slate-700" />
+                <h3 className="text-sm font-bold text-slate-900">Manage Consultation</h3>
+              </div>
+              <button
+                onClick={() => setSelectedBooking(null)}
+                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="py-4 space-y-3.5">
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Client Contact Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter client or prospect name..."
+                  defaultValue={resolveClientName(selectedBooking).displayName}
+                  id="client-name-input"
+                  className="input-field w-full text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                  <span className="text-slate-400 text-[10px] uppercase font-semibold block">Date (IST)</span>
+                  <span className="font-semibold text-slate-900 mt-0.5 block">{formatDateIST(selectedBooking.date)}</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                  <span className="text-slate-400 text-[10px] uppercase font-semibold block">Slot Time (IST)</span>
+                  <span className="font-semibold text-slate-900 mt-0.5 block">{formatTimeIST(selectedBooking.time, true)}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Appointment Status
+                </label>
+                <select
+                  id="status-select"
+                  defaultValue={getEffectiveStatus(selectedBooking, selectedBooking.id || `${selectedBooking.phone}-${selectedBooking.date}-${selectedBooking.time}`).label}
+                  className="input-field w-full text-xs"
+                >
+                  <option value="Confirmed">Confirmed</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Rescheduled">Rescheduled</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Internal Consultation Notes
+                </label>
+                <textarea
+                  id="notes-input"
+                  placeholder="e.g. Discussed Singapore incorporation and tax residency..."
+                  rows={2}
+                  defaultValue={overrides[selectedBooking.id || `${selectedBooking.phone}-${selectedBooking.date}-${selectedBooking.time}`]?.notes || ''}
+                  className="input-field w-full text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setSelectedBooking(null)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const bId = selectedBooking.id || `${selectedBooking.phone}-${selectedBooking.date}-${selectedBooking.time}`;
+                  const nameVal = (document.getElementById('client-name-input') as HTMLInputElement)?.value;
+                  const statusVal = (document.getElementById('status-select') as HTMLSelectElement)?.value;
+                  const notesVal = (document.getElementById('notes-input') as HTMLTextAreaElement)?.value;
+
+                  setOverrides((prev) => ({
+                    ...prev,
+                    [bId]: {
+                      name: nameVal?.trim() || undefined,
+                      status: statusVal || 'Confirmed',
+                      notes: notesVal?.trim() || undefined,
+                    }
+                  }));
+                  setSelectedBooking(null);
+                }}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-2xs"
+              >
+                Save Details
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
