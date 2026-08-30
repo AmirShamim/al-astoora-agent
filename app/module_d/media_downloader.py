@@ -95,67 +95,67 @@ async def download_media(media_id: str, timeout: float = 30.0) -> Dict[str, Any]
         meta_url = _get_media_meta_url(media_id)
         meta_response = await client.get(meta_url, headers=headers)
 
-            if meta_response.status_code != 200:
-                logger.error(
-                    "WhatsApp Media Meta API error [%d] for media_id %s: %s",
-                    meta_response.status_code,
-                    media_id,
-                    meta_response.text,
-                )
-                return {
-                    "success": False,
-                    "error": f"WhatsApp media metadata lookup failed [{meta_response.status_code}]",
-                    "media_id": media_id,
-                }
-
-            meta_data = meta_response.json()
-            download_url = meta_data.get("url")
-            mime_type = meta_data.get("mime_type", "application/octet-stream")
-
-            if not download_url:
-                logger.error("No download URL returned for media_id %s: %s", media_id, meta_data)
-                return {
-                    "success": False,
-                    "error": "No download URL returned by WhatsApp",
-                    "media_id": media_id,
-                }
-
-            # Step 2: Download raw media bytes from direct URL
-            media_response = await client.get(download_url, headers=headers)
-
-            if media_response.status_code != 200:
-                logger.error(
-                    "WhatsApp Media Download failed [%d] for media_id %s: %s",
-                    media_response.status_code,
-                    media_id,
-                    media_response.text,
-                )
-                return {
-                    "success": False,
-                    "error": f"WhatsApp media file download failed [{media_response.status_code}]",
-                    "media_id": media_id,
-                }
-
-            file_bytes = media_response.content
-            # Use content-type from response if available and more specific
-            content_type_header = media_response.headers.get("content-type")
-            if content_type_header and "application/octet-stream" not in content_type_header:
-                mime_type = content_type_header.split(";")[0].strip()
-
-            logger.info(
-                "Successfully downloaded media %s (%d bytes, %s)",
+        if meta_response.status_code != 200:
+            logger.error(
+                "WhatsApp Media Meta API error [%d] for media_id %s: %s",
+                meta_response.status_code,
                 media_id,
-                len(file_bytes),
-                mime_type,
+                meta_response.text,
             )
-
             return {
-                "success": True,
-                "file_bytes": file_bytes,
-                "mime_type": mime_type,
-                "file_size": len(file_bytes),
+                "success": False,
+                "error": f"WhatsApp media metadata lookup failed [{meta_response.status_code}]",
                 "media_id": media_id,
             }
+
+        meta_data = meta_response.json()
+        download_url = meta_data.get("url")
+        mime_type = meta_data.get("mime_type", "application/octet-stream")
+
+        if not download_url:
+            logger.error("No download URL returned for media_id %s: %s", media_id, meta_data)
+            return {
+                "success": False,
+                "error": "No download URL returned by WhatsApp",
+                "media_id": media_id,
+            }
+
+        # Step 2: Download raw media bytes from direct URL
+        media_response = await client.get(download_url, headers=headers)
+
+        if media_response.status_code != 200:
+            logger.error(
+                "WhatsApp Media Download failed [%d] for media_id %s: %s",
+                media_response.status_code,
+                media_id,
+                media_response.text,
+            )
+            return {
+                "success": False,
+                "error": f"WhatsApp media file download failed [{media_response.status_code}]",
+                "media_id": media_id,
+            }
+
+        file_bytes = media_response.content
+        # Use content-type from response if available and more specific
+        content_type_header = media_response.headers.get("content-type")
+        if content_type_header and "application/octet-stream" not in content_type_header:
+            mime_type = content_type_header.split(";")[0].strip()
+
+        logger.info(
+            "Successfully downloaded media %s (%d bytes, %s)",
+            media_id,
+            len(file_bytes),
+            mime_type,
+        )
+
+        return {
+            "success": True,
+            "file_bytes": file_bytes,
+            "mime_type": mime_type,
+            "file_size": len(file_bytes),
+            "media_id": media_id,
+        }
 
     except httpx.TimeoutException as e:
         logger.error("Timeout downloading WhatsApp media %s: %s", media_id, e)
