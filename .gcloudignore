@@ -1,9 +1,11 @@
+# Ignore files for gcloud deploy — only deploy backend Python code
 .gcloudignore
 .dockerignore
 .git
 .gitignore
 .env
-.venv
+.env.example
+.venv/
 env/
 venv/
 tests/
@@ -11,9 +13,22 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.md
+
+# Frontend — deployed separately on Vercel, NOT needed on Cloud Run
 frontend/
-frontend/node_modules/
-frontend/dist/
+
+# Build artifacts
 node_modules/
 dist/
 build/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Deploy script itself (not needed inside the container)
+deploy.sh

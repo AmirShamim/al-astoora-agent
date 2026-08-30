@@ -1,9 +1,11 @@
+# Ignore files for Docker build — only include backend Python code
 .git
 .gitignore
 .gcloudignore
 .dockerignore
 .env
-.venv
+.env.example
+.venv/
 env/
 venv/
 tests/
@@ -11,7 +13,22 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.md
+
+# Frontend — deployed separately on Vercel, NOT needed in Docker image
 frontend/
+
+# Build artifacts
 node_modules/
 dist/
 build/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Deploy script
+deploy.sh
