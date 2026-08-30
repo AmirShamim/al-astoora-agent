@@ -401,7 +401,7 @@ async def get_all_submissions(limit: int = 50) -> List[Dict[str, Any]]:
     try:
         db = get_firestore_client()
         submissions_stream = (
-            db.collection(DOCUMENT_SUBMISSIONS_COLLECTION)
+            db.collection(SUBMISSIONS_COLLECTION)
             .order_by("submitted_at", direction=firestore.Query.DESCENDING)
             .limit(limit)
             .stream()
