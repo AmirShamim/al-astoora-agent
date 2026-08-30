@@ -9,8 +9,6 @@ import {
   MessageCircle,
   Copy,
   Check,
-  Edit3,
-  X,
   List,
   LayoutGrid,
   CalendarRange,
@@ -25,23 +23,15 @@ interface BookingsTabProps {
   clients?: ClientProfile[];
 }
 
-interface BookingOverride {
-  name?: string;
-  status?: string;
-  notes?: string;
-}
-
 export const BookingsTab: React.FC<BookingsTabProps> = ({ 
   bookings = [], 
   leads = [], 
   clients = [] 
 }) => {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'upcoming' | 'today' | 'completed'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'upcoming' | 'completed'>('all');
   const [viewMode, setViewMode] = useState<'cards' | 'timeline' | 'table'>('cards');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
-  const [overrides, setOverrides] = useState<Record<string, BookingOverride>>({});
 
   // Clean phone number formatting (e.g. 917011190158 -> +91 70111 90158)
   const formatPhoneNumber = (phoneStr: string): string => {
@@ -62,17 +52,8 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
     return phoneStr.startsWith('+') ? phoneStr : `+${phoneStr}`;
   };
 
-  // Resolves a human name rather than placeholders like "Valued Client" or "..."
+  // Resolves human name rather than placeholders like "Valued Client" or "..."
   const resolveClientName = (booking: Booking): { displayName: string; hasRealName: boolean; formattedPhone: string } => {
-    const bookingId = booking.id || `${booking.phone}-${booking.date}-${booking.time}`;
-    if (overrides[bookingId]?.name) {
-      return {
-        displayName: overrides[bookingId].name!,
-        hasRealName: true,
-        formattedPhone: formatPhoneNumber(booking.phone)
-      };
-    }
-
     const phone = (booking.phone || '').trim();
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     const rawName = (booking.name || '').trim();
@@ -171,7 +152,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
     return dateStr;
   };
 
-  // Checks whether the booking's scheduled IST slot has already occurred
+  // Checks whether the booking's scheduled slot has already occurred in IST
   const isBookingInPast = (dateStr: string, timeStr?: string): boolean => {
     if (!dateStr) return false;
     const nowMs = Date.now();
@@ -218,27 +199,8 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
     }
   };
 
-  // Automatically resolves status: past appointments become "Completed"
-  const getEffectiveStatus = (booking: Booking, bookingId: string) => {
-    const manualOverride = overrides[bookingId]?.status;
-    if (manualOverride) {
-      if (manualOverride.toLowerCase() === 'completed') {
-        return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
-      }
-      if (manualOverride.toLowerCase() === 'cancelled') {
-        return { label: 'Cancelled', isPast: true, badgeClass: 'badge-rose' };
-      }
-      if (manualOverride.toLowerCase() === 'rescheduled') {
-        return { label: 'Rescheduled', isPast: false, badgeClass: 'badge-amber' };
-      }
-      if (manualOverride.toLowerCase() === 'confirmed') {
-        const inPast = isBookingInPast(booking.date, booking.time);
-        if (inPast) return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
-        return { label: 'Confirmed', isPast: false, badgeClass: 'badge-emerald' };
-      }
-      return { label: manualOverride, isPast: false, badgeClass: 'badge-slate' };
-    }
-
+  // Status computation: past appointments are automatically "Completed", future are "Confirmed"
+  const getBookingStatus = (booking: Booking) => {
     const rawStatus = (booking.status || 'confirmed').toLowerCase();
     if (rawStatus === 'cancelled') {
       return { label: 'Cancelled', isPast: true, badgeClass: 'badge-rose' };
@@ -246,29 +208,13 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
     if (rawStatus === 'rescheduled') {
       return { label: 'Rescheduled', isPast: false, badgeClass: 'badge-amber' };
     }
-    if (rawStatus === 'completed') {
+    if (rawStatus === 'completed' || isBookingInPast(booking.date, booking.time)) {
       return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
     }
-
-    // Automatically check if the slot has already occurred
-    const inPast = isBookingInPast(booking.date, booking.time);
-    if (inPast) {
-      return { label: 'Completed', isPast: true, badgeClass: 'badge-slate' };
-    }
-
     return { label: 'Confirmed', isPast: false, badgeClass: 'badge-emerald' };
   };
 
-  // Categorize appointment status relative to IST current date
-  const getTimelineCategory = (dateStr: string, timeStr?: string) => {
-    const inPast = isBookingInPast(dateStr, timeStr);
-    if (inPast) return 'completed';
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (dateStr === todayStr) return 'today';
-    return 'upcoming';
-  };
-
-  // Generate Google Calendar Link strictly with IST (+05:30 offset)
+  // Generate Google Calendar Link strictly in IST (+05:30 offset)
   const generateGCalUrl = (b: Booking) => {
     const { displayName } = resolveClientName(b);
     const title = encodeURIComponent(`Al Astoora Consultation — ${displayName}`);
@@ -304,7 +250,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
       messageText = 
         `Hello ${displayName},\n\n` +
         `This is a reminder for your upcoming consultation with Al Astoora on *${formattedDate}* at *${formattedTime}*.\n\n` +
-        `Please let us know if you need to reschedule or have any questions.\n\n` +
+        `Please let us know if you have any questions before the session.\n\n` +
         `Best regards,\nAl Astoora Client Team`;
     }
 
@@ -315,7 +261,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
   const handleCopyDetails = (b: Booking, id: string, statusLabel: string) => {
     const { displayName, formattedPhone } = resolveClientName(b);
     const text = 
-      `📋 Consultation Details (Al Astoora)\n` +
+      `📋 Consultation Booking (Al Astoora)\n` +
       `• Client: ${displayName}\n` +
       `• Phone: ${formattedPhone}\n` +
       `• Date: ${formatDateIST(b.date)}\n` +
@@ -332,9 +278,8 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
     return bookings
       .filter((b) => {
         if (!b) return false;
-        const bId = b.id || `${b.phone}-${b.date}-${b.time}`;
         const { displayName, formattedPhone } = resolveClientName(b);
-        const { isPast } = getEffectiveStatus(b, bId);
+        const { isPast } = getBookingStatus(b);
         const date = b.date || '';
         const time = b.time || '';
         
@@ -345,11 +290,9 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
           date.includes(search) ||
           time.includes(search);
 
-        const category = getTimelineCategory(date, time);
         const matchesFilter =
           statusFilter === 'all' ||
-          (statusFilter === 'upcoming' && category === 'upcoming') ||
-          (statusFilter === 'today' && category === 'today') ||
+          (statusFilter === 'upcoming' && !isPast) ||
           (statusFilter === 'completed' && isPast);
 
         return matchesSearch && matchesFilter;
@@ -359,7 +302,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
         const dateB = `${b.date || ''} ${b.time || ''}`;
         return dateB.localeCompare(dateA);
       });
-  }, [bookings, search, statusFilter, overrides, leads, clients]);
+  }, [bookings, search, statusFilter, leads, clients]);
 
   // Group by Date for Timeline View
   const groupedByDate = useMemo(() => {
@@ -372,7 +315,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
     return groups;
   }, [filteredBookings]);
 
-  // Metrics
+  // Metrics counts
   const upcomingCount = bookings.filter((b) => !isBookingInPast(b.date || '', b.time)).length;
   const completedCount = bookings.filter((b) => isBookingInPast(b.date || '', b.time)).length;
   const uniquePhones = new Set(bookings.map((b) => b.phone)).size;
@@ -394,7 +337,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Real-time appointment schedule with conflict-free WhatsApp slot reservation via <code className="font-mono text-slate-700 font-medium">book_appointment</code>.
+              Appointments booked over WhatsApp with conflict-free slot reservation via <code className="font-mono text-slate-700 font-medium">book_appointment</code>.
             </p>
           </div>
 
@@ -508,12 +451,12 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
               {filteredBookings.map((booking, idx) => {
                 const bookingId = booking.id || `${booking.phone}-${booking.date}-${booking.time}-${idx}`;
                 const { displayName, hasRealName, formattedPhone } = resolveClientName(booking);
-                const { label: statusLabel, isPast, badgeClass } = getEffectiveStatus(booking, bookingId);
+                const { label: statusLabel, isPast, badgeClass } = getBookingStatus(booking);
 
                 return (
                   <div
                     key={bookingId}
-                    className="card p-4 flex flex-col justify-between hover:border-slate-300 transition-all group"
+                    className="card p-4 flex flex-col justify-between hover:border-slate-300 transition-all"
                   >
                     <div>
                       {/* Card Header: Client & Status */}
@@ -523,30 +466,19 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                             {hasRealName ? displayName[0].toUpperCase() : <Phone className="w-3.5 h-3.5 text-slate-500" />}
                           </div>
                           <div>
-                            <div className="flex items-center gap-1.5">
-                              <h3 className="font-semibold text-sm text-slate-900 leading-snug">
-                                {displayName}
-                              </h3>
-                              <button
-                                onClick={() => setSelectedBooking(booking)}
-                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-700 transition-opacity p-0.5"
-                                title="Edit Name / Notes"
-                              >
-                                <Edit3 className="w-3 h-3" />
-                              </button>
-                            </div>
+                            <h3 className="font-semibold text-sm text-slate-900 leading-snug">
+                              {displayName}
+                            </h3>
                             <p className="text-xs font-mono text-slate-500 mt-0.5">
                               {formattedPhone}
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex flex-col items-end gap-1">
-                          <span className={badgeClass}>
-                            {isPast ? <CheckCheck className="w-3 h-3 text-slate-500" /> : <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
-                            {statusLabel}
-                          </span>
-                        </div>
+                        <span className={badgeClass}>
+                          {isPast ? <CheckCheck className="w-3 h-3 text-slate-500" /> : <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                          {statusLabel}
+                        </span>
                       </div>
 
                       {/* IST Date & Time Schedule Box */}
@@ -571,13 +503,6 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                           </span>
                         </div>
                       </div>
-
-                      {/* Notes if any */}
-                      {overrides[bookingId]?.notes && (
-                        <div className="mb-3 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                          <span className="font-semibold">Note:</span> {overrides[bookingId].notes}
-                        </div>
-                      )}
                     </div>
 
                     {/* Action Bar */}
@@ -592,7 +517,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                           title={isPast ? 'Send follow-up message on WhatsApp' : 'Send appointment reminder on WhatsApp'}
                         >
                           <MessageCircle className="w-3 h-3 text-emerald-600" />
-                          <span>{isPast ? 'Follow-up' : 'Reminder'}</span>
+                          <span>{isPast ? 'Follow-up' : 'WhatsApp'}</span>
                         </a>
 
                         {/* Copy Details */}
@@ -609,8 +534,8 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                         </button>
                       </div>
 
-                      {/* Google Calendar / Manage Action */}
-                      {!isPast ? (
+                      {/* Google Calendar Action for Upcoming */}
+                      {!isPast && (
                         <a
                           href={generateGCalUrl(booking)}
                           target="_blank"
@@ -621,14 +546,6 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                           <ExternalLink className="w-3 h-3" />
                           <span>Add to GCal</span>
                         </a>
-                      ) : (
-                        <button
-                          onClick={() => setSelectedBooking(booking)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium transition-colors"
-                        >
-                          <Edit3 className="w-3 h-3" />
-                          <span>Manage</span>
-                        </button>
                       )}
                     </div>
                   </div>
@@ -665,7 +582,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                       {dateBookings.map((b, idx) => {
                         const bId = b.id || `${b.phone}-${b.date}-${b.time}-${idx}`;
                         const { displayName, formattedPhone } = resolveClientName(b);
-                        const { label: statusLabel, isPast, badgeClass } = getEffectiveStatus(b, bId);
+                        const { label: statusLabel, isPast, badgeClass } = getBookingStatus(b);
 
                         return (
                           <div key={bId} className="py-3 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -736,7 +653,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                     {filteredBookings.map((b, idx) => {
                       const bId = b.id || `${b.phone}-${b.date}-${b.time}-${idx}`;
                       const { displayName, formattedPhone } = resolveClientName(b);
-                      const { label: statusLabel, isPast, badgeClass } = getEffectiveStatus(b, bId);
+                      const { label: statusLabel, isPast, badgeClass } = getBookingStatus(b);
 
                       return (
                         <tr key={bId} className="hover:bg-slate-50/70 transition-colors">
@@ -780,13 +697,6 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                                   <ExternalLink className="w-4 h-4" />
                                 </a>
                               )}
-                              <button
-                                onClick={() => setSelectedBooking(b)}
-                                className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-                                title="Edit / Notes"
-                              >
-                                <Edit3 className="w-4 h-4" />
-                              </button>
                             </div>
                           </td>
                         </tr>
@@ -803,113 +713,6 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
           <CalendarDays className="w-8 h-8 mx-auto mb-2 text-slate-400" />
           <p className="text-sm font-medium text-slate-700">No consultation appointments found for this filter.</p>
           <p className="text-xs text-slate-400 mt-0.5">Appointments booked via WhatsApp interactive slots will appear here automatically.</p>
-        </div>
-      )}
-
-      {/* Edit / Manage Booking Modal */}
-      {selectedBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
-          <div className="relative w-full max-w-md bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden p-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <CalendarIcon className="w-4 h-4 text-slate-700" />
-                <h3 className="text-sm font-bold text-slate-900">Manage Consultation</h3>
-              </div>
-              <button
-                onClick={() => setSelectedBooking(null)}
-                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="py-4 space-y-3.5">
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Client Contact Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Enter client or prospect name..."
-                  defaultValue={resolveClientName(selectedBooking).displayName}
-                  id="client-name-input"
-                  className="input-field w-full text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                  <span className="text-slate-400 text-[10px] uppercase font-semibold block">Date (IST)</span>
-                  <span className="font-semibold text-slate-900 mt-0.5 block">{formatDateIST(selectedBooking.date)}</span>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                  <span className="text-slate-400 text-[10px] uppercase font-semibold block">Slot Time (IST)</span>
-                  <span className="font-semibold text-slate-900 mt-0.5 block">{formatTimeIST(selectedBooking.time, true)}</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Appointment Status
-                </label>
-                <select
-                  id="status-select"
-                  defaultValue={getEffectiveStatus(selectedBooking, selectedBooking.id || `${selectedBooking.phone}-${selectedBooking.date}-${selectedBooking.time}`).label}
-                  className="input-field w-full text-xs"
-                >
-                  <option value="Confirmed">Confirmed</option>
-                  <option value="Completed">Completed</option>
-                  <option value="Rescheduled">Rescheduled</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">
-                  Internal Consultation Notes
-                </label>
-                <textarea
-                  id="notes-input"
-                  placeholder="e.g. Discussed Singapore incorporation and tax residency..."
-                  rows={2}
-                  defaultValue={overrides[selectedBooking.id || `${selectedBooking.phone}-${selectedBooking.date}-${selectedBooking.time}`]?.notes || ''}
-                  className="input-field w-full text-xs"
-                />
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setSelectedBooking(null)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  const bId = selectedBooking.id || `${selectedBooking.phone}-${selectedBooking.date}-${selectedBooking.time}`;
-                  const nameVal = (document.getElementById('client-name-input') as HTMLInputElement)?.value;
-                  const statusVal = (document.getElementById('status-select') as HTMLSelectElement)?.value;
-                  const notesVal = (document.getElementById('notes-input') as HTMLTextAreaElement)?.value;
-
-                  setOverrides((prev) => ({
-                    ...prev,
-                    [bId]: {
-                      name: nameVal?.trim() || undefined,
-                      status: statusVal || 'Confirmed',
-                      notes: notesVal?.trim() || undefined,
-                    }
-                  }));
-                  setSelectedBooking(null);
-                }}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-2xs"
-              >
-                Save Details
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
