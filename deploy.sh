@@ -22,14 +22,13 @@ echo ""
 
 gcloud run deploy al-astoora-agent \
   --source . \
-  --region us-central1 \
+  --region asia-south1 \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars "APP_ENV=production" \
-  --memory 512Mi \
   --timeout 300 \
-  --min-instances 0 \
+  --min-instances 1 \
   --max-instances 3 \
+  --set-env-vars "APP_ENV=production,GCP_PROJECT_ID=project-080b5971-eb4b-4d2b-a4c,GCP_LOCATION=asia-south1,GCS_BUCKET_NAME=al-astoora-documents,GEMINI_MODEL=gemini-3.7-flash,GEMINI_LOCATION=global,WHATSAPP_TOKEN=EAAStEGDoJOYBR6eSp1ZAu8IxU86MbIQX6SkHOY5SDQtNvUaph2yUFtCZAgiz0ZBZCn2r7japgrLSMEps2QcU1S2lNerokp1RZBzpFXxP3zA2b34jJz7lwVezhE60TZCEZAsWmXdtguJKwo4e5j6kyqr1kjTgRZCvWZC05IdHm8EqYhxSHMcsktK8wFJuNvi0bgBa34wZDZD,WHATSAPP_PHONE_NUMBER_ID=1113443245192571,BOT_PHONE_NUMBER=919289581053,WEBHOOK_VERIFY_TOKEN=al_astoora_secure_verify_token_2026" \
   --quiet
 
 echo ""
