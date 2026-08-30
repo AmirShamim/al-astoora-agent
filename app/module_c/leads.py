@@ -4,7 +4,7 @@ Handles recording and querying prospective client leads in Firestore.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from google.cloud import firestore
 
 from app.module_c.firestore_client import get_firestore_client
