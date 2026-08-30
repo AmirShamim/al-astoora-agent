@@ -141,7 +141,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ clients }) => {
                   {/* Service Track Tag */}
                   <div className="mb-4">
                     <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-slate-950 text-slate-300 border border-slate-800">
-                      {client.service_type || 'sg_company_registration'}
+                      {client.service_type || 'client_onboarding'}
                     </span>
                   </div>
 

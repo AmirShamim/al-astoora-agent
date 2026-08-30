@@ -208,19 +208,29 @@ async def update_document_status(
         )
 
         if not client_snap.exists:
-            if not auto_create_client:
+            # Only create a client onboarding profile when a document is successfully validated
+            if not auto_create_client or status != "validated":
                 return {
                     "success": False,
-                    "error": f"Client not found for phone {phone}",
+                    "error": f"Client profile not created yet for phone {phone} (awaiting first validated document).",
                 }
-            # Auto-initialize client profile
+            # Fetch prospect name from leads if available
+            client_name = phone
+            try:
+                from app.module_c.leads import get_lead_by_phone
+                lead_res = await get_lead_by_phone(phone)
+                if lead_res.get("success") and lead_res.get("lead"):
+                    client_name = lead_res["lead"].get("name") or phone
+            except Exception:
+                pass
+
             init_client_data = {
-                "name": phone,
+                "name": client_name,
                 "phone": phone,
-                "service_type": "general_verification",
+                "service_type": "client_onboarding",
                 "onboarding_started": firestore.SERVER_TIMESTAMP,
                 "onboarding_status": "in_progress",
-                "documents_required": 1,
+                "documents_required": 3,
                 "documents_received": 0,
                 "last_activity": firestore.SERVER_TIMESTAMP,
             }

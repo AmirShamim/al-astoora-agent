@@ -123,7 +123,7 @@ export const App: React.FC = () => {
   const loadAllData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [s, c, l, b, sub] = await Promise.all([
+      const results = await Promise.allSettled([
         fetchStats(),
         fetchClients(),
         fetchLeads(),
@@ -131,12 +131,32 @@ export const App: React.FC = () => {
         fetchSubmissions(),
       ]);
 
-      setStats(s);
-      if (c && c.length > 0) setClients(c);
-      if (l && l.length > 0) setLeads(l);
-      if (b && b.length > 0) setBookings(b);
-      if (sub && sub.length > 0) setSubmissions(sub);
-      setApiOnline(true);
+      const [statsRes, clientsRes, leadsRes, bookingsRes, submissionsRes] = results;
+
+      let anySuccess = false;
+
+      if (statsRes.status === 'fulfilled') {
+        setStats(statsRes.value);
+        anySuccess = true;
+      }
+      if (clientsRes.status === 'fulfilled') {
+        setClients(clientsRes.value);
+        anySuccess = true;
+      }
+      if (leadsRes.status === 'fulfilled') {
+        setLeads(leadsRes.value);
+        anySuccess = true;
+      }
+      if (bookingsRes.status === 'fulfilled') {
+        setBookings(bookingsRes.value);
+        anySuccess = true;
+      }
+      if (submissionsRes.status === 'fulfilled') {
+        setSubmissions(submissionsRes.value);
+        anySuccess = true;
+      }
+
+      setApiOnline(anySuccess);
     } catch (err) {
       console.warn('Dashboard using cached/demo snapshot (Backend offline or local test mode):', err);
       setApiOnline(false);

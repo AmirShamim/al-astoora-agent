@@ -108,6 +108,42 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         />
       </div>
 
+      {/* Client Acquisition & Onboarding Funnel */}
+      <div className="glass-card p-6 border border-slate-800">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-brand-400" />
+            <span>Autonomous Client Conversion Funnel</span>
+          </h3>
+          <span className="text-xs text-slate-400 font-mono">End-to-End Pipeline</span>
+        </div>
+        <p className="text-xs text-slate-400 mb-4">
+          Visualizing the real-time transition from WhatsApp outreach inquiry to verified client onboarding:
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-center">
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-brand-500/30">
+            <span className="text-[11px] text-brand-300 font-medium block">1. Top-of-Funnel</span>
+            <span className="text-xl font-extrabold text-white my-1 block">{stats.total_leads} Leads</span>
+            <span className="text-[10px] text-slate-400">Captured on first contact</span>
+          </div>
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-amber-500/30">
+            <span className="text-[11px] text-amber-300 font-medium block">2. Discovery Call</span>
+            <span className="text-xl font-extrabold text-white my-1 block">{stats.total_bookings} Bookings</span>
+            <span className="text-[10px] text-slate-400">Interactive slot reservation</span>
+          </div>
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-emerald-500/30">
+            <span className="text-[11px] text-emerald-300 font-medium block">3. Active Onboarding</span>
+            <span className="text-xl font-extrabold text-white my-1 block">{stats.total_clients} Clients</span>
+            <span className="text-[10px] text-slate-400">Document intake started</span>
+          </div>
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-violet-500/30">
+            <span className="text-[11px] text-violet-300 font-medium block">4. Verified / Complete</span>
+            <span className="text-xl font-extrabold text-white my-1 block">{stats.completed_clients} Verified</span>
+            <span className="text-[10px] text-slate-400">Gemini Vision approved</span>
+          </div>
+        </div>
+      </div>
+
       {/* Middle Two-Column Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
@@ -117,52 +153,52 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                <span>Service Pipeline Capabilities</span>
+                <span>Configured Automation Tracks</span>
               </h3>
               <span className="text-xs text-slate-400 font-mono">Firestore Native</span>
             </div>
 
             <p className="text-xs text-slate-400 mb-6">
-              Autonomous workflows configured with multi-tier document checklists:
+              Autonomous workflows configured with multimodal document verification checklists:
             </p>
 
             <div className="space-y-4">
-              {/* Track 1: SG Company Registration */}
+              {/* Track 1: Client Onboarding Automation */}
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
                 <div className="flex items-center justify-between text-xs font-semibold mb-2">
-                  <span className="text-slate-200">Singapore Corporate Secretarial (ACRA)</span>
+                  <span className="text-slate-200">Client Onboarding Automation</span>
                   <span className="badge-brand">3 Documents</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-400 mb-2">
-                  <span>Required: Passport, Proof of Address, Director Resolution</span>
+                  <span>Checklist: Passport, Proof of Address, Director Resolution</span>
                 </div>
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div className="bg-gradient-to-r from-brand-500 to-emerald-400 h-full rounded-full w-4/5"></div>
                 </div>
               </div>
 
-              {/* Track 2: UAE Trade License */}
+              {/* Track 2: Financial Compliance Automation */}
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
                 <div className="flex items-center justify-between text-xs font-semibold mb-2">
-                  <span className="text-slate-200">GCC / UAE Business Onboarding</span>
+                  <span className="text-slate-200">Financial Compliance Automation</span>
                   <span className="badge-emerald">3 Documents</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-400 mb-2">
-                  <span>Required: Emirates ID / Passport, Trade License, MOA</span>
+                  <span>Checklist: Trade License, Bank Statement, Tax Assessment</span>
                 </div>
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full w-3/5"></div>
                 </div>
               </div>
 
-              {/* Track 3: WhatsApp Automation Setup */}
+              {/* Track 3: WhatsApp AI & Workflow Automation */}
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
                 <div className="flex items-center justify-between text-xs font-semibold mb-2">
-                  <span className="text-slate-200">Custom WhatsApp AI Engine Setup</span>
+                  <span className="text-slate-200">WhatsApp AI & Workflow Scheduling</span>
                   <span className="badge-amber">Direct Discovery</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <span>Interactive slot booking, lead capture, and price quote automation</span>
+                  <span>Interactive slot booking, collision protection, and lead CRM sync</span>
                 </div>
               </div>
             </div>
