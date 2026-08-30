@@ -68,7 +68,7 @@ def close_genai_client() -> None:
     _genai_client = None
 
 
-# Rigid canonical enum constants for corporate data integrity
+# Rigid canonical enum constants for data integrity
 VALID_DOC_TYPES = {
     "passport",
     "proof_of_address",
@@ -85,6 +85,11 @@ VALID_DOC_TYPES = {
 }
 
 VALID_SERVICE_TRACKS = {
+    "client_onboarding",
+    "financial_compliance",
+    "employment_processing",
+    "general_verification",
+    # Legacy aliases still accepted
     "sg_company_registration",
     "accounting_services",
     "immigration_consulting",
@@ -166,9 +171,10 @@ def _normalize_eligibility_status(raw_status: Any, is_valid: bool) -> str:
 
 
 def _normalize_service_track(raw_track: Any, doc_type: str) -> str:
-    """Deterministically normalizes service track to one of the 4 rigid system tracks."""
+    """Deterministically normalizes service track to one of the standard automation tracks."""
     clean = str(raw_track or "").strip().lower().replace("-", "_").replace(" ", "_")
     if clean in (
+        "client_onboarding",
         "sg_company_registration",
         "sg_reg",
         "company_registration",
@@ -177,22 +183,24 @@ def _normalize_service_track(raw_track: Any, doc_type: str) -> str:
         "corporate_secretarial",
         "corporate_secretarial_compliance",
     ):
-        return "sg_company_registration"
-    if clean in ("accounting_services", "accounting", "tax", "bookkeeping", "tax_compliance"):
-        return "accounting_services"
-    if clean in ("immigration_consulting", "immigration", "visa", "employment_pass"):
-        return "immigration_consulting"
+        return "client_onboarding"
+    if clean in ("financial_compliance", "accounting_services", "accounting", "tax", "bookkeeping", "tax_compliance"):
+        return "financial_compliance"
+    if clean in ("employment_processing", "immigration_consulting", "immigration", "visa", "employment_pass"):
+        return "employment_processing"
+    if clean in ("general_verification", "general_corporate_services"):
+        return "general_verification"
     if clean in VALID_SERVICE_TRACKS:
         return clean
 
     # Infer standard track from document type
     if doc_type in ("passport", "proof_of_address", "director_resolution", "acra_bizfile", "company_constitution"):
-        return "sg_company_registration"
+        return "client_onboarding"
     if doc_type in ("bank_statement", "tax_assessment", "invoice"):
-        return "accounting_services"
+        return "financial_compliance"
     if doc_type in ("resume", "employment_contract"):
-        return "immigration_consulting"
-    return "general_corporate_services"
+        return "employment_processing"
+    return "general_verification"
 
 
 def _build_validation_prompt(expected_doc_type: str, current_date_str: str) -> str:
@@ -205,8 +213,8 @@ def _build_validation_prompt(expected_doc_type: str, current_date_str: str) -> s
         else f"Examine the attached file which is expected to be a '{expected_doc_type}'."
     )
 
-    return f"""You are a strict, expert document validation specialist & corporate workflow consultant for Al Astoora (alastoora.tech).
-Al Astoora is a digital infrastructure & SaaS agency assisting corporate secretarial, accounting, tax, and immigration clients in Singapore and GCC (UAE).
+    return f"""You are a strict, expert document validation specialist & workflow automation consultant for Al Astoora (alastoora.tech).
+Al Astoora is an AI automation agency that designs and deploys custom AI agents, intelligent WhatsApp automations, and backend workflow integrations for businesses.
 
 Today's date is: {current_date_str}
 
@@ -216,24 +224,24 @@ Task:
 Validate the document according to these strict professional criteria:
 1. Document Identification: Accurately identify and classify the document. If it is an irrelevant photo (selfie, landscape, meme), flag as invalid.
 2. Readability & Quality: Text, registration numbers, dates, and official seals must be crisp and legible. Flag if there are severe blurs, glare, reflections, or if fingers/objects cover vital details or dates.
-3. Expiry & Validity: Extract expiry or validity dates. Check if the document has expired relative to today ({current_date_str}). Flag expired documents as invalid.
+3. Expiry & Validity: Extract expiry or validity dates. Check if the document has expired relative to today ({current_date_str}). Flag expired documents as invalid. If the expiry date area is covered, obscured, or unreadable, flag as invalid.
 4. Signature & Authentication: If the document is a director resolution, contract, or legal agreement, verify if it is signed/executed.
-5. Corporate Eligibility & Business Insights:
+5. Business Insights & Eligibility:
    - Extract business insights (Company Name, Registration/UEN/Tax ID, Registered Capital, Directors/Officers, Financial figures).
-   - Evaluate corporate service eligibility with a specific reason.
+   - Evaluate document eligibility with a specific reason.
 
 CRITICAL SCHEMA REQUIREMENTS (STRICT ENUMS ONLY - NO EXCEPTIONS):
 - 'document_type' MUST be strictly one of: ["passport", "proof_of_address", "trade_license", "bank_statement", "tax_assessment", "director_resolution", "company_constitution", "acra_bizfile", "invoice", "resume", "employment_contract", "general_document"]
 - 'is_valid' MUST be boolean: true or false
 - 'eligibility_assessment.eligibility_status' MUST be strictly one of: ["eligible", "ineligible", "pending_review"]
-- 'eligibility_assessment.service_track' MUST be strictly one of: ["sg_company_registration", "accounting_services", "immigration_consulting", "general_corporate_services"]
-- 'eligibility_assessment.eligibility_reason': Specific explanation of corporate qualification or disqualification.
+- 'eligibility_assessment.service_track' MUST be strictly one of: ["client_onboarding", "financial_compliance", "employment_processing", "general_verification"]
+- 'eligibility_assessment.eligibility_reason': Specific explanation of qualification or disqualification.
 - 'eligibility_assessment.recommended_next_step': Specific actionable next step.
 
 Client Message Guidelines:
 Write a friendly, polite 1-2 sentence message to the client on WhatsApp with prominent emoji highlighting:
-- If valid (is_valid = true): Start with '✅' (e.g., "✅ Thank you! Your Trade License has been verified. Next, please upload your company bank statement.")
-- If invalid (is_valid = false): Start with '⚠️' or '❌' (e.g., "⚠️ The document you sent appears to be a handwritten note, not a trade license. Could you please send the official trade license document for us to proceed?")
+- If valid (is_valid = true): Start with '✅' (e.g., "✅ Thank you! Your passport has been verified. Next, please upload your proof of address.")
+- If invalid (is_valid = false): Start with '⚠️' or '❌' (e.g., "⚠️ The document you sent appears to have the expiry date covered. Please send a clear photo with all fields fully visible.")
 
 Respond strictly in valid JSON matching this exact schema:
 {{
@@ -246,8 +254,8 @@ Respond strictly in valid JSON matching this exact schema:
   "client_message": "✅ Thank you! Your document has been successfully verified.",
   "eligibility_assessment": {{
     "eligibility_status": "eligible",
-    "service_track": "sg_company_registration",
-    "eligibility_reason": "Specific reason explaining business qualification or disqualification",
+    "service_track": "client_onboarding",
+    "eligibility_reason": "Specific reason explaining qualification or disqualification",
     "recommended_next_step": "Next document or consultation step"
   }}
 }}
@@ -292,7 +300,7 @@ def _parse_gemini_json_response(raw_text: str, expected_doc_type: str) -> Dict[s
             "client_message": "⚠️ We received your document, but could not process it automatically. Our team will review it shortly.",
             "eligibility_assessment": {
                 "eligibility_status": "ineligible",
-                "service_track": "general_corporate_services",
+                "service_track": "general_verification",
                 "eligibility_reason": "Document could not be parsed automatically.",
                 "recommended_next_step": "Please submit a clear image or document file.",
                 "status": "ineligible",
@@ -571,7 +579,7 @@ async def validate_document(
             - is_valid (bool): Whether the document passed all validation checks
             - issues (list[str]): List of identified issues or rejections reasons
             - client_message (str): Ready-to-send WhatsApp explanation message
-            - eligibility_assessment (dict): Corporate eligibility and workflow recommendation
+            - eligibility_assessment (dict): Document eligibility and workflow recommendation
             - file_url (str | None): GCS URL if uploaded
             - media_id (str): WhatsApp media ID
             - mime_type (str): Detected media MIME type

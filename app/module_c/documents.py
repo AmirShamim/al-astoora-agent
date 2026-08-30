@@ -3,6 +3,7 @@ Module C: Document Intake State Management.
 Handles updates to client document submission, validation, rejection, and intake progression.
 """
 
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from google.cloud import firestore
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 CLIENTS_COLLECTION = "clients"
 DOCUMENTS_SUBCOLLECTION = "documents"
 SUBMISSIONS_COLLECTION = "document_submissions"
+ESCALATIONS_COLLECTION = "escalations"
 
 
 async def record_document_submission(
@@ -215,7 +217,7 @@ async def update_document_status(
             init_client_data = {
                 "name": phone,
                 "phone": phone,
-                "service_type": "general_corporate_services",
+                "service_type": "general_verification",
                 "onboarding_started": firestore.SERVER_TIMESTAMP,
                 "onboarding_status": "in_progress",
                 "documents_required": 1,
@@ -404,3 +406,102 @@ async def get_all_submissions(limit: int = 50) -> List[Dict[str, Any]]:
         logger.warning("Failed to fetch all submissions: %s", e)
         return []
 
+
+async def get_rejection_count(phone: str, doc_type: str) -> int:
+    """
+    Returns the number of consecutive rejections for a specific document type
+    for a client. Used by the 3-strike escalation logic.
+
+    Args:
+        phone: Client phone number.
+        doc_type: Document type key.
+
+    Returns:
+        Number of rejection attempts (0 if no rejections or client/doc not found).
+    """
+    try:
+        db = get_firestore_client()
+        doc_ref = (
+            db.collection(CLIENTS_COLLECTION)
+            .document(phone)
+            .collection(DOCUMENTS_SUBCOLLECTION)
+            .document(doc_type)
+        )
+        doc_snap = await doc_ref.get()
+
+        if not doc_snap.exists:
+            return 0
+
+        doc_data = doc_snap.to_dict() or {}
+        # Count attempts only if current status is 'rejected'
+        if doc_data.get("status") == "rejected":
+            return doc_data.get("attempts", 0)
+        return 0
+
+    except Exception as e:
+        logger.warning("Could not check rejection count for %s/%s: %s", phone, doc_type, e)
+        return 0
+
+
+async def record_escalation(
+    phone: str,
+    reason: str,
+    doc_type: str = "",
+    escalation_type: str = "document_validation_failure",
+) -> Dict[str, Any]:
+    """
+    Records a human escalation event in Firestore for dashboard visibility and audit.
+
+    Args:
+        phone: Client phone number.
+        reason: Why the case is being escalated.
+        doc_type: The document type that triggered escalation.
+        escalation_type: Category of escalation.
+
+    Returns:
+        Dict with success status and escalation_id.
+    """
+    try:
+        db = get_firestore_client()
+        esc_ref = db.collection(ESCALATIONS_COLLECTION).document()
+
+        escalation_data = {
+            "phone": phone,
+            "doc_type": doc_type,
+            "reason": reason,
+            "escalation_type": escalation_type,
+            "status": "pending",
+            "created_at": firestore.SERVER_TIMESTAMP,
+            "resolved_at": None,
+            "resolved_by": None,
+        }
+        await esc_ref.set(escalation_data)
+
+        # Also update client profile to mark escalated status
+        client_ref = db.collection(CLIENTS_COLLECTION).document(phone)
+        client_snap = await client_ref.get()
+        if client_snap.exists:
+            await client_ref.update({
+                "escalation_status": "escalated",
+                "escalation_reason": reason,
+                "escalation_doc_type": doc_type,
+                "last_activity": firestore.SERVER_TIMESTAMP,
+            })
+
+        logger.info(
+            "Escalation recorded for %s: %s (doc_type=%s, id=%s)",
+            phone, reason, doc_type, esc_ref.id,
+        )
+        return {
+            "success": True,
+            "escalation_id": esc_ref.id,
+            "phone": phone,
+            "message": f"Escalation recorded. A human team member will review the case for {phone}.",
+        }
+
+    except Exception as e:
+        logger.exception("Failed to record escalation for %s: %s", phone, e)
+        return {
+            "success": False,
+            "error": f"Could not record escalation: {str(e)}",
+        }

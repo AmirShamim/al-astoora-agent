@@ -26,6 +26,7 @@ from app.module_b.tools import (
     send_booking_buttons,
     send_interactive_booking_slots,
     book_appointment,
+    escalate_to_human,
     send_whatsapp_text,
     send_whatsapp_buttons,
     send_whatsapp_list,
@@ -626,7 +627,7 @@ async def _process_single_message_turn(message: ParsedMessage) -> None:
             if is_continuing:
                 fallback_msg = f"Thank you, {profile_name}. I have noted that. How would you like to proceed?"
             else:
-                fallback_msg = f"Hi {profile_name}! Welcome to Al Astoora. How can we help automate or streamline your corporate services today?"
+                fallback_msg = f"Hi {profile_name}! Welcome to Al Astoora. How can we help automate your business workflows today?"
 
             await append_session_message(sender_phone, "model", fallback_msg)
             await send_text_message(recipient_phone=sender_phone, text=fallback_msg)

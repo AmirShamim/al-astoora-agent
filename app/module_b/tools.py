@@ -19,7 +19,7 @@ async def capture_lead(name: str, phone: str, interest: str) -> str:
     Args:
         name: The client's full name.
         phone: The client's phone number with country code (e.g. "6591234567").
-        interest: Service interest description (e.g. "Singapore company registration").
+        interest: Service interest description (e.g. "AI automation for client onboarding").
 
     Returns:
         String summary of the lead capture outcome.
@@ -43,7 +43,7 @@ async def get_or_create_client(phone: str, name: str, service_type: str) -> str:
     Args:
         phone: The client's phone number with country code (e.g. "6591234567").
         name: The client's full name.
-        service_type: Service identifier ('sg_company_registration', 'accounting_services', or 'immigration_consulting').
+        service_type: Service identifier ('client_onboarding', 'financial_compliance', 'employment_processing', or 'general_verification').
 
     Returns:
         String summary of client record and required document checklist.
@@ -158,7 +158,7 @@ async def validate_document(
 ) -> str:
     """
     Downloads, stores, and validates a client's document image or PDF using Gemini 3.7 Flash multimodal vision.
-    Extracts structured business information, validates authenticity/readability, assesses corporate eligibility,
+    Extracts structured business information, validates authenticity/readability, assesses eligibility,
     and automatically records the submission to both the client's onboarding profile and the top-level database.
 
     Args:
@@ -220,6 +220,15 @@ async def validate_document(
                 rejection_reason=rejection_reason,
             )
 
+        # Check rejection count for 3-strike escalation awareness
+        rejection_count = 0
+        if not is_valid and effective_phone and effective_phone != "unknown":
+            try:
+                from app.module_c.documents import get_rejection_count
+                rejection_count = await get_rejection_count(effective_phone, detected_doc_type)
+            except Exception:
+                pass
+
         summary = {
             "is_valid": is_valid,
             "document_type": detected_doc_type,
@@ -228,7 +237,17 @@ async def validate_document(
             "extracted_fields": extracted,
             "eligibility_assessment": eligibility,
             "file_url": file_url,
+            "rejection_count": rejection_count,
         }
+
+        # Add escalation hint when 3+ rejections
+        if rejection_count >= 3:
+            summary["escalation_required"] = True
+            summary["escalation_message"] = (
+                "This document has been rejected 3 or more times. "
+                "You MUST call escalate_to_human now and send the handoff message."
+            )
+
         return json.dumps(summary)
     except Exception as e:
         logger.exception("Error in validate_document tool: %s", e)
@@ -238,6 +257,7 @@ async def validate_document(
             "client_message": "We received your file but encountered a temporary issue inspecting it. Our team will review it manually.",
             "issues": [str(e)],
             "eligibility_assessment": {},
+            "rejection_count": 0,
         })
 
 
@@ -547,6 +567,40 @@ async def send_whatsapp_list(
         return f"Failed to send list message: {str(e)}"
 
 
+async def escalate_to_human(phone: str, reason: str, doc_type: str = "") -> str:
+    """
+    Escalates a client case to the human support team when automated handling
+    has been exhausted (e.g., 3 failed document validation attempts).
+    Records the escalation event in Firestore for dashboard visibility.
+
+    Args:
+        phone: Client's phone number with country code.
+        reason: Why the case is being escalated (e.g., "3 failed passport validation attempts").
+        doc_type: The document type that triggered escalation.
+
+    Returns:
+        Confirmation that the human team has been notified.
+    """
+    try:
+        from app.module_c.documents import record_escalation
+        result = await record_escalation(
+            phone=phone,
+            reason=reason,
+            doc_type=doc_type,
+            escalation_type="document_validation_failure",
+        )
+        if result.get("success"):
+            return (
+                f"Escalation recorded (ID: {result.get('escalation_id')}). "
+                f"The human support team has been notified about {phone}'s case. "
+                f"Send the handoff message to the client now."
+            )
+        return f"Warning: Could not record escalation — {result.get('error')}. Still send the handoff message to the client."
+    except Exception as e:
+        logger.exception("Error in escalate_to_human tool: %s", e)
+        return "Could not record escalation due to a temporary issue. Still send the handoff message to the client."
+
+
 ALL_TOOLS = [
     capture_lead,
     get_or_create_client,
@@ -557,6 +611,7 @@ ALL_TOOLS = [
     send_booking_buttons,
     send_interactive_booking_slots,
     book_appointment,
+    escalate_to_human,
     send_whatsapp_text,
     send_whatsapp_buttons,
     send_whatsapp_list,

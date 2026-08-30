@@ -16,35 +16,71 @@ DOCUMENTS_SUBCOLLECTION = "documents"
 INTAKE_TEMPLATES_COLLECTION = "intake_templates"
 
 # Default fallback templates if intake_templates collection is not yet seeded in Firestore
+# Includes both new automation-focused track names and legacy aliases for backward compatibility
 DEFAULT_INTAKE_TEMPLATES: Dict[str, Dict[str, Any]] = {
-    "sg_company_registration": {
-        "service_name": "Singapore Company Registration",
+    "client_onboarding": {
+        "service_name": "Client Onboarding Automation",
         "required_documents": [
             "passport",
             "proof_of_address",
             "director_resolution",
-            "company_name_approval",
         ],
-        "description": "Documents required for incorporating a company in Singapore.",
+        "description": "Document validation workflow for client onboarding automation.",
     },
-    "accounting_services": {
-        "service_name": "Accounting & Tax Services",
+    "financial_compliance": {
+        "service_name": "Financial Compliance Automation",
         "required_documents": [
-            "bank_statements",
-            "invoices_receipts",
-            "previous_tax_return",
+            "trade_license",
+            "bank_statement",
+            "tax_assessment",
         ],
-        "description": "Documents required for annual accounting and tax filings.",
+        "description": "Document validation workflow for financial compliance automation.",
     },
-    "immigration_consulting": {
-        "service_name": "Immigration Consulting",
+    "employment_processing": {
+        "service_name": "Employment Processing Automation",
         "required_documents": [
             "passport",
-            "resume_cv",
-            "educational_certificates",
-            "employment_offer_letter",
+            "resume",
+            "employment_contract",
         ],
-        "description": "Documents required for employment pass and visa applications.",
+        "description": "Document validation workflow for employment processing automation.",
+    },
+    "general_verification": {
+        "service_name": "General Document Verification",
+        "required_documents": [
+            "trade_license",
+            "bank_statement",
+            "company_constitution",
+        ],
+        "description": "General document verification automation workflow.",
+    },
+    # Legacy aliases for backward compatibility with existing Firestore data
+    "sg_company_registration": {
+        "service_name": "Client Onboarding Automation",
+        "required_documents": [
+            "passport",
+            "proof_of_address",
+            "director_resolution",
+        ],
+        "description": "Document validation workflow for client onboarding automation.",
+    },
+    "accounting_services": {
+        "service_name": "Financial Compliance Automation",
+        "required_documents": [
+            "trade_license",
+            "bank_statement",
+            "tax_assessment",
+        ],
+        "description": "Document validation workflow for financial compliance automation.",
+    },
+    "immigration_consulting": {
+        "service_name": "Employment Processing Automation",
+        "required_documents": [
+            "passport",
+            "resume",
+            "employment_contract",
+        ],
+        "description": "Document validation workflow for employment processing automation.",
     },
 }
 
